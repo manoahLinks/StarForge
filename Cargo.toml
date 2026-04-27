@@ -43,6 +43,8 @@ hardware-wallet = ["dep:hidapi"]
 
 [dev-dependencies]
 criterion = "0.5.1"
+tempfile = "3.8"
+mockito = "1.2"
 
 [[bench]]
 name = "benchmarks"

@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,9 +16,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --release --locked
-      - name: Upload binary
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp target/release/starforge dist/starforge
+          tar -czf dist/starforge-linux-x86_64.tar.gz -C dist starforge
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: starforge-linux
-          path: target/release/starforge
+          name: starforge-linux-x86_64
+          path: dist/starforge-linux-x86_64.tar.gz
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/starforge-linux-x86_64.tar.gz
 
