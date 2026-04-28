@@ -3,12 +3,17 @@ use anyhow::{Context, Result};
 use libloading::{Library, Symbol};
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::path::Path;
 use std::rc::Rc;
 
 pub struct PluginManager {
     plugins: HashMap<String, Box<dyn Plugin>>,
     libraries: Vec<Rc<Library>>,
+}
+
+impl Default for PluginManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PluginManager {
@@ -19,6 +24,9 @@ impl PluginManager {
         }
     }
 
+    /// # Safety
+    /// The caller must ensure the plugin at `path` is a valid starforge plugin
+    /// compiled with a compatible Rust toolchain and ABI.
     pub unsafe fn load_plugin<P: AsRef<OsStr>>(&mut self, path: P) -> Result<()> {
         let library = Rc::new(Library::new(path).context("Failed to load library")?);
 

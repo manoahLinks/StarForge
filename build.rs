@@ -24,7 +24,7 @@ enum Commands {
 }
 
 fn main() {
-    let outdir = match env::var_os("OUT_DIR") {
+    let _outdir = match env::var_os("OUT_DIR") {
         None => return,
         Some(outdir) => outdir,
     };

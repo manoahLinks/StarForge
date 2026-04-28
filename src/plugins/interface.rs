@@ -34,5 +34,5 @@ macro_rules! export_plugin {
     };
 }
 
-pub const RUSTC_VERSION: &'static str = env!("RUSTC_VERSION");
-pub const CORE_VERSION: &'static str = env!("CARGO_PKG_VERSION");
+pub const RUSTC_VERSION: &str = env!("RUSTC_VERSION");
+pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");

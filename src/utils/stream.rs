@@ -88,10 +88,12 @@ struct SorobanGetEventsResult {
 #[derive(Debug, Deserialize)]
 pub struct SorobanEvent {
     #[serde(rename = "type")]
+    #[allow(dead_code)]
     pub event_type: String,
     pub ledger: u32,
     pub id: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub topic: Vec<String>,
     pub value: serde_json::Value,
 }

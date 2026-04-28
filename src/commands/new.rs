@@ -274,22 +274,22 @@ fn hello_world_template(name: &str, storage: &str, include_tests: bool) -> Strin
     };
 
     let storage_method = match storage {
-        "persistent" => format!(r#"
-    pub fn set_value(env: Env, key: Symbol, value: u64) {{
+        "persistent" => r#"
+    pub fn set_value(env: Env, key: Symbol, value: u64) {
         env.storage().persistent().set(&key, &value);
-    }}
+    }
 
-    pub fn get_value(env: Env, key: Symbol) -> Option<u64> {{
+    pub fn get_value(env: Env, key: Symbol) -> Option<u64> {
         env.storage().persistent().get(&key)
-    }}"#),
-        "temporary" => format!(r#"
-    pub fn set_value(env: Env, key: Symbol, value: u64) {{
+    }"#.to_string(),
+        "temporary" => r#"
+    pub fn set_value(env: Env, key: Symbol, value: u64) {
         env.storage().temporary().set(&key, &value);
-    }}
+    }
 
-    pub fn get_value(env: Env, key: Symbol) -> Option<u64> {{
+    pub fn get_value(env: Env, key: Symbol) -> Option<u64> {
         env.storage().temporary().get(&key)
-    }}"#),
+    }"#.to_string(),
         _ => String::new(),
     };
 

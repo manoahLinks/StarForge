@@ -208,6 +208,7 @@ fn backup_config(config: &Config) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn rollback_config(version: &str) -> Result<()> {
     let config_dir = config_dir();
     let backup_pattern = format!("config.backup.v{}", version);
@@ -226,7 +227,7 @@ pub fn rollback_config(version: &str) -> Result<()> {
     }
     
     // Sort by timestamp (newest first)
-    backups.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    backups.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
     
     let latest_backup = &backups[0];
     let backup_path = latest_backup.path();
