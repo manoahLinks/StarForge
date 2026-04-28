@@ -1,7 +1,6 @@
 use crate::utils::{config, print as p, soroban};
 use anyhow::Result;
 use clap::Args;
-use colored::*;
 
 #[derive(Args)]
 pub struct InvokeArgs {
@@ -34,6 +33,7 @@ pub struct InvokeArgs {
     simulate: bool,
 }
 
+#[allow(dead_code)]
 pub fn handle(args: InvokeArgs) -> Result<()> {
     let cfg = config::load()?;
     let network = args.network.as_ref().unwrap_or(&cfg.network);

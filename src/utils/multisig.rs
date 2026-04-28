@@ -122,28 +122,25 @@ pub fn save_transaction(path: &Path, tx: &MultiSigTransaction) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn validate_signer(public_key: &str) -> Result<()> {
     StellarPublicKey::from_string(public_key)
         .map_err(|_| anyhow::anyhow!("Invalid Stellar public key: {}", public_key))?;
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn validate_weight(weight: u8) -> Result<()> {
     if weight == 0 {
         anyhow::bail!("Signer weight must be greater than 0");
     }
-    if weight > 255 {
-        anyhow::bail!("Signer weight cannot exceed 255");
-    }
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn validate_threshold(threshold: u8) -> Result<()> {
     if threshold == 0 {
         anyhow::bail!("Threshold must be greater than 0");
-    }
-    if threshold > 255 {
-        anyhow::bail!("Threshold cannot exceed 255");
     }
     Ok(())
 }
@@ -215,6 +212,7 @@ pub fn add_signature_to_transaction(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn build_multisig_transaction_xdr(
     source_account: &str,
     operations: &[String],

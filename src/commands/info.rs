@@ -19,10 +19,10 @@ pub fn handle() -> Result<()> {
     for net in ["testnet", "mainnet"] {
         let online = horizon::check_network(net);
         println!(
-            "  {} {}  {}",
+            "  {} {:<10}  {}",
             "◎".cyan(),
-            format!("{:<10}", net),
-            if online { "online".green().bold() } else { "unreachable".red().into() }
+            net,
+            if online { "online".green().bold() } else { "unreachable".red() }
         );
     }
 

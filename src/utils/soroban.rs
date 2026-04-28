@@ -4,7 +4,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use stellar_strkey::{ed25519, Contract};
 use stellar_xdr::curr::{
     AccountId, ContractDataDurability, ContractExecutable, Hash, LedgerEntryData, LedgerKey,
-    LedgerKeyContractData, Limits, PublicKey, ScAddress, ScMap, ScString, ScSymbol, ScVal,
+    LedgerKeyContractData, PublicKey, ScAddress, ScMap, ScString, ScSymbol, ScVal,
     Uint256,
 };
 
@@ -66,6 +66,7 @@ struct GetLedgerEntriesResult {
 
 #[derive(Debug, Deserialize)]
 struct RpcLedgerEntry {
+    #[allow(dead_code)]
     xdr: String,
     #[serde(rename = "lastModifiedLedgerSeq")]
     last_modified_ledger_seq: Option<u32>,
@@ -228,6 +229,7 @@ fn ledger_key_to_xdr_base64(key: &LedgerKey) -> Result<String> {
     Ok(general_purpose::STANDARD.encode(mock_xdr))
 }
 
+#[allow(dead_code)]
 fn ledger_entry_from_xdr_base64(xdr: &str) -> Result<LedgerEntryData> {
     use base64::{engine::general_purpose, Engine as _};
     // Simplified XDR decoding - in production use proper stellar-xdr decoding
@@ -368,6 +370,7 @@ fn extract_transaction_hash(result: &serde_json::Value) -> Result<String> {
     }
 }
 
+#[allow(dead_code)]
 fn describe_executable(executable: &ContractExecutable) -> (String, Option<String>) {
     match executable {
         ContractExecutable::Wasm(hash) => ("Wasm".to_string(), Some(format_hash(hash))),
@@ -375,6 +378,7 @@ fn describe_executable(executable: &ContractExecutable) -> (String, Option<Strin
     }
 }
 
+#[allow(dead_code)]
 fn format_durability(durability: ContractDataDurability) -> &'static str {
     match durability {
         ContractDataDurability::Persistent => "Persistent",
@@ -382,6 +386,7 @@ fn format_durability(durability: ContractDataDurability) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn collect_instance_storage(storage: Option<&ScMap>) -> Vec<ContractStorageEntry> {
     storage.map_or_else(Vec::new, |entries| {
         entries
@@ -395,6 +400,7 @@ fn collect_instance_storage(storage: Option<&ScMap>) -> Vec<ContractStorageEntry
     })
 }
 
+#[allow(dead_code)]
 fn format_scval(value: &ScVal) -> String {
     match value {
         ScVal::Bool(value) => value.to_string(),
@@ -446,6 +452,7 @@ fn format_scval(value: &ScVal) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn format_scaddress(address: &ScAddress) -> String {
     match address {
         ScAddress::Contract(Hash(bytes)) => Contract(*bytes).to_string(),
@@ -455,10 +462,12 @@ fn format_scaddress(address: &ScAddress) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn format_hash(hash: &Hash) -> String {
     format_bytes(&hash.0)
 }
 
+#[allow(dead_code)]
 fn format_bytes(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

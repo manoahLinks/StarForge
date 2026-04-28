@@ -2,7 +2,6 @@ use crate::utils::config;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -68,6 +67,7 @@ fn save_telemetry_locally(data: &TelemetryData) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn set_telemetry_enabled(enabled: bool) -> Result<()> {
     let mut cfg = config::load()?;
     cfg.telemetry_enabled = Some(enabled);

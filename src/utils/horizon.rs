@@ -11,9 +11,11 @@ pub fn horizon_url(network: &str) -> &'static str {
 
 #[derive(Debug, Deserialize)]
 pub struct AccountResponse {
+    #[allow(dead_code)]
     pub id: String,
     pub sequence: String,
     pub balances: Vec<Balance>,
+    #[allow(dead_code)]
     pub subentry_count: u32,
 }
 

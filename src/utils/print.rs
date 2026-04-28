@@ -6,6 +6,7 @@ pub fn success(msg: &str) {
     println!("{} {}", "✓".green().bold(), msg);
 }
 
+#[allow(dead_code)]
 pub fn error(msg: &str) {
     eprintln!("{} {}", "✗".red().bold(), msg);
 }
@@ -42,6 +43,7 @@ pub fn step(n: usize, total: usize, msg: &str) {
     );
 }
 
+#[allow(dead_code)]
 pub fn spinner(msg: &str) -> ProgressBar {
     let pb = ProgressBar::new_spinner();
     pb.enable_steady_tick(Duration::from_millis(120));
@@ -65,6 +67,7 @@ pub fn progress_bar(total: u64, msg: &str) -> ProgressBar {
     pb
 }
 
+#[allow(dead_code)]
 pub fn multi_progress() -> MultiProgress {
     MultiProgress::new()
 }

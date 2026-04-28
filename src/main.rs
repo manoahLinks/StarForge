@@ -70,6 +70,10 @@ enum Commands {
     #[command(subcommand)]
     Plugin(commands::plugin::PluginCommands),
 
+    /// Contract upgrade management (propose, approve, execute, rollback)
+    #[command(subcommand)]
+    Upgrade(commands::upgrade::UpgradeCommands),
+
     /// Execute an installed plugin command (e.g. `starforge defi ...`)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -98,6 +102,7 @@ fn main() {
         Commands::Test(_) => "test",
         Commands::Gas(_) => "gas",
         Commands::Plugin(_) => "plugin",
+        Commands::Upgrade(_) => "upgrade",
         Commands::External(_) => "external",
     }.to_string();
 
@@ -118,6 +123,7 @@ fn main() {
         Commands::Test(args) => commands::test::handle(args),
         Commands::Gas(args) => commands::gas::handle(args),
         Commands::Plugin(args) => commands::plugin::handle(args),
+        Commands::Upgrade(cmd) => commands::upgrade::handle(cmd),
         Commands::External(args) => handle_external_plugin(args),
     };
     let duration = start.elapsed();
