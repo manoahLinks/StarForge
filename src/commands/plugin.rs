@@ -7,6 +7,8 @@ use std::path::PathBuf;
 #[derive(Subcommand)]
 pub enum PluginCommands {
     /// Register a plugin shared library for StarForge to load
+    ///
+    /// Example: starforge plugin install starforge-defi --path ./libstarforge_defi.so
     Install {
         /// Plugin name (used as the command name)
         name: String,
@@ -18,6 +20,13 @@ pub enum PluginCommands {
     List,
     /// Load installed plugins and show those successfully loaded
     Load,
+    /// Remove a plugin from the registry
+    ///
+    /// Example: starforge plugin uninstall starforge-defi
+    Uninstall {
+        /// Plugin name to remove
+        name: String,
+    },
 }
 
 pub fn handle(cmd: PluginCommands) -> Result<()> {
@@ -25,6 +34,7 @@ pub fn handle(cmd: PluginCommands) -> Result<()> {
         PluginCommands::Install { name, path } => install(name, path),
         PluginCommands::List => list(),
         PluginCommands::Load => load(),
+        PluginCommands::Uninstall { name } => uninstall(name),
     }
 }
 
@@ -88,5 +98,23 @@ fn load() -> Result<()> {
         p::kv_accent(name, desc);
     }
     p::separator();
+    Ok(())
+}
+
+fn uninstall(name: String) -> Result<()> {
+    let mut reg = registry::load_registry().unwrap_or_default();
+
+    let before = reg.plugins.len();
+    reg.plugins.retain(|p| p.name != name);
+
+    if reg.plugins.len() == before {
+        anyhow::bail!("Plugin '{}' is not installed. Run `starforge plugin list` to see installed plugins.", name);
+    }
+
+    registry::save_registry(&reg)?;
+
+    p::header("Plugin Uninstall");
+    p::success(&format!("Plugin '{}' removed from registry", name));
+    p::info("The plugin library file on disk was not deleted.");
     Ok(())
 }

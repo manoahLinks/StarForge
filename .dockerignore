@@ -6,4 +6,14 @@ target
 **/*.tmp
 Dockerfile
 docker-compose.yml
-
+# Docs and tutorials — not needed in the build image
+tutorials
+Documentation.md
+README.md
+TUTORIAL.md
+# Editor and OS artifacts
+.vscode
+.idea
+*.DS_Store
+# Test output / benchmark artifacts
+benches/target

@@ -1,4 +1,5 @@
 services:
+  # Local Stellar + Soroban RPC node (testnet-equivalent)
   stellar-testnet:
     image: stellar/quickstart:latest
     command: ["--local"]
@@ -10,9 +11,33 @@ services:
       timeout: 3s
       retries: 30
 
+  # Dedicated Soroban RPC endpoint (useful when separating horizon from rpc traffic)
   soroban-rpc:
     image: stellar/quickstart:latest
     command: ["--local"]
     ports:
       - "8001:8000"
+    depends_on:
+      stellar-testnet:
+        condition: service_healthy
 
+  # StarForge CLI dev container — mounts the project root for live `cargo run`
+  # Usage: docker-compose run --rm starforge starforge <command>
+  # Example: docker-compose run --rm starforge starforge deploy --wasm ./token.wasm --network docker-testnet
+  starforge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/workspace
+      - cargo-cache:/usr/local/cargo/registry
+    environment:
+      - NEXT_PUBLIC_STELLAR_RPC_URL=http://soroban-rpc:8000
+      - STELLAR_NETWORK=local
+    depends_on:
+      stellar-testnet:
+        condition: service_healthy
+    working_dir: /workspace
+
+volumes:
+  cargo-cache:

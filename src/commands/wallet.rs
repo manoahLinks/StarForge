@@ -50,8 +50,24 @@ pub enum WalletCommands {
         new_name: String,
     },
 
-    /// Connect to a hardware wallet (Ledger/Trezor)
+    /// Connect to a hardware wallet (Ledger/Trezor) and show device info
     Connect {
+        #[arg(value_enum)]
+        device: hardware_wallet::HardwareWalletKind,
+    },
+
+    /// Show the Stellar address derived from a connected hardware wallet
+    HwAddress {
+        /// Device type
+        #[arg(value_enum)]
+        device: hardware_wallet::HardwareWalletKind,
+        /// HD derivation path (default: m/44'/148'/0')
+        #[arg(long, default_value = hardware_wallet::STELLAR_HD_PATH)]
+        path: String,
+    },
+
+    /// Show connection status of a hardware wallet without full connect
+    HwStatus {
         #[arg(value_enum)]
         device: hardware_wallet::HardwareWalletKind,
     },
@@ -108,6 +124,20 @@ pub enum MultisigCommands {
     List,
     /// Show a stored multi-sig account
     Show { name: String },
+    /// Submit a fully-signed multi-sig transaction to Horizon
+    ///
+    /// Example:
+    /// starforge wallet multisig submit treasury --transaction tx.json
+    Submit {
+        /// Multi-sig account name
+        name: String,
+        /// Path to a signed MultiSigTransaction JSON file
+        #[arg(long)]
+        transaction: PathBuf,
+        /// Network to submit on (default: testnet)
+        #[arg(long, value_parser = ["testnet", "mainnet", "docker-testnet"])]
+        network: Option<String>,
+    },
 }
 
 pub fn handle(cmd: WalletCommands) -> Result<()> {
@@ -119,18 +149,43 @@ pub fn handle(cmd: WalletCommands) -> Result<()> {
         WalletCommands::Remove { name } => remove(name),
         WalletCommands::Rename { old_name, new_name } => rename(old_name, new_name),
         WalletCommands::Connect { device } => connect_hardware(device),
+        WalletCommands::HwAddress { device, path } => hw_address(device, &path),
+        WalletCommands::HwStatus { device } => hw_status(device),
         WalletCommands::Sign { name, message, hardware } => sign_message(name, message, hardware),
         WalletCommands::Multisig(cmd) => handle_multisig(cmd),
     }
 }
 
 fn connect_hardware(device: hardware_wallet::HardwareWalletKind) -> Result<()> {
-    p::header("Hardware Wallet");
-    p::step(1, 2, &format!("Connecting to {:?}…", device));
-    hardware_wallet::connect(device)?;
-    p::step(2, 2, "Device detected");
+    p::header("Hardware Wallet — Connect");
+    p::step(1, 3, &format!("Initializing HID subsystem for {}…", device));
+    let info = hardware_wallet::connect(device)?;
+    p::step(2, 3, &format!("{} HID device(s) visible", info.device_count));
+    p::step(3, 3, "Connection verified");
     println!();
-    p::success(&format!("{:?} connected (device detection only).", device));
+    p::success(&format!("{} connected", device));
+    p::kv("Devices visible", &info.device_count.to_string());
+    p::kv("HD path", &info.hd_path);
+    p::info("Run `starforge wallet hw-address <device>` to derive your Stellar address.");
+    Ok(())
+}
+
+fn hw_address(device: hardware_wallet::HardwareWalletKind, path: &str) -> Result<()> {
+    p::header("Hardware Wallet — Stellar Address");
+    p::step(1, 2, &format!("Requesting address from {} at {}", device, path));
+    let address = hardware_wallet::get_stellar_address(device, path)?;
+    p::step(2, 2, "Address received");
+    println!();
+    p::kv("Device", &device.to_string());
+    p::kv("HD Path", path);
+    p::kv_accent("Stellar Address", &address);
+    Ok(())
+}
+
+fn hw_status(device: hardware_wallet::HardwareWalletKind) -> Result<()> {
+    p::header("Hardware Wallet — Status");
+    let status = hardware_wallet::device_status(device)?;
+    p::kv("Status", &status);
     Ok(())
 }
 
@@ -474,6 +529,7 @@ fn handle_multisig(cmd: MultisigCommands) -> Result<()> {
         MultisigCommands::Sign { name, transaction, output } => multisig_sign(name, transaction, output),
         MultisigCommands::List => multisig_list(),
         MultisigCommands::Show { name } => multisig_show(name),
+        MultisigCommands::Submit { name, transaction, network } => multisig_submit(name, transaction, network),
     }
 }
 
@@ -655,7 +711,45 @@ fn multisig_show(name: String) -> Result<()> {
     let total_weight = multisig::calculate_total_weight(&multisig_account.signers);
     println!();
     p::kv_accent("Total Weight", &total_weight.to_string());
-    
+
     p::separator();
+    Ok(())
+}
+
+fn multisig_submit(name: String, transaction: PathBuf, network: Option<String>) -> Result<()> {
+    config::validate_wallet_name(&name)?;
+    config::validate_file_path(&transaction, Some("json"))?;
+
+    let account = multisig::load_account(&name)?;
+    let tx = multisig::load_transaction(&transaction)?;
+
+    let network = network.unwrap_or_else(|| "testnet".to_string());
+    config::validate_network(&network)?;
+
+    p::header(&format!("Multi-Sig Submit: {}", name));
+    p::kv("Account", &account.account_id);
+    p::kv("Network", &network);
+    p::kv("Signatures", &tx.signatures.len().to_string());
+    p::kv("Threshold", &tx.threshold_required.to_string());
+
+    if tx.status != multisig::TransactionStatus::ReadyToSubmit {
+        anyhow::bail!(
+            "Transaction is not ready to submit (status: {:?}). \
+             Collect enough signatures first with `starforge wallet multisig sign`.",
+            tx.status
+        );
+    }
+
+    p::step(1, 2, "Combining signatures into final envelope…");
+    let signed_xdr = multisig::combine_signatures(&tx.transaction_xdr, &tx.signatures)?;
+
+    p::step(2, 2, &format!("Submitting to Horizon ({})…", network));
+    let result = horizon::submit_multisig_transaction(&signed_xdr, &network)?;
+
+    println!();
+    p::success("Transaction submitted");
+    p::kv_accent("Hash", &result.hash);
+    p::kv("Successful", &result.successful.to_string());
+    p::info(&format!("View on explorer: https://stellar.expert/explorer/{}/tx/{}", network, result.hash));
     Ok(())
 }
