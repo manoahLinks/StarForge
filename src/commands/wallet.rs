@@ -14,7 +14,7 @@ pub enum WalletCommands {
     Create {
         /// A friendly name for the wallet (e.g. "alice", "deployer")
         name: String,
-        /// Fund the wallet via Friendbot immediately (testnet only)
+        /// Fund the wallet via network-specific faucet immediately when available
         #[arg(long, default_value = "false")]
         fund: bool,
         /// Network to associate with this wallet (overrides global config)
@@ -34,7 +34,7 @@ pub enum WalletCommands {
         #[arg(long, default_value = "false")]
         reveal: bool,
     },
-    /// Fund a wallet via Friendbot (testnet only)
+    /// Fund a wallet via a configured network faucet
     Fund {
         /// Wallet name to fund
         name: String,
@@ -296,16 +296,17 @@ fn create(name: String, fund: bool, network_override: Option<String>, encrypt: b
     cfg.wallets.push(wallet);
 
     if fund {
-        if network == "mainnet" {
+        let net_cfg = config::get_network_config(&cfg, &network)?;
+        if net_cfg.friendbot_url.is_none() && network == "mainnet" {
             p::warn("Friendbot is not available on Mainnet. Skipping fund step.");
         } else {
-            p::step(3, steps, "Funding via Friendbot…");
-            match horizon::fund_account(&public_key) {
+            p::step(3, steps, "Funding via network faucet…");
+            match horizon::fund_account(&public_key, &network) {
                 Ok(_) => {
                     if let Some(w) = cfg.wallets.iter_mut().find(|w| w.name == name) {
                         w.funded = true;
                     }
-                    p::success("Funded with 10,000 XLM on testnet");
+                    p::success("Account funded via configured faucet");
                 }
                 Err(e) => p::warn(&format!("Funding failed: {}", e)),
             }
@@ -421,7 +422,10 @@ fn fund_wallet(name: String) -> Result<()> {
     let mut cfg = config::load()?;
 
     if cfg.network == "mainnet" {
-        anyhow::bail!("Friendbot is not available on Mainnet.");
+        let net_cfg = config::get_network_config(&cfg, &cfg.network)?;
+        if net_cfg.friendbot_url.is_none() {
+            anyhow::bail!("Friendbot is not available on Mainnet.");
+        }
     }
 
     let public_key = cfg
@@ -431,8 +435,8 @@ fn fund_wallet(name: String) -> Result<()> {
         .map(|w| w.public_key.clone())
         .ok_or_else(|| anyhow::anyhow!("Wallet '{}' not found", name))?;
 
-    p::info(&format!("Funding '{}' via Friendbot…", name));
-    horizon::fund_account(&public_key)?;
+    p::info(&format!("Funding '{}' via configured network faucet…", name));
+    horizon::fund_account(&public_key, &cfg.network)?;
 
     if let Some(w) = cfg.wallets.iter_mut().find(|w| w.name == name) {
         w.funded = true;

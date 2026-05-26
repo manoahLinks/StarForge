@@ -1,4 +1,4 @@
-use crate::utils::{config, horizon, print as p};
+use crate::utils::{config, horizon, optimizer, print as p};
 use anyhow::Result;
 use clap::Args;
 use colored::*;
@@ -18,6 +18,9 @@ pub struct DeployArgs {
     /// Wallet name to use for deployment
     #[arg(long)]
     pub wallet: Option<String>,
+    /// Optimize the WASM before deployment using the built-in optimizer
+    #[arg(long, default_value = "false")]
+    pub optimize: bool,
     /// Skip confirmation prompt
     #[arg(long, default_value = "false")]
     pub yes: bool,
@@ -53,11 +56,30 @@ pub fn handle(args: DeployArgs) -> Result<()> {
         );
     }
 
-    let wasm_bytes = fs::read(&args.wasm)?;
-    let wasm_size_kb = wasm_bytes.len() as f64 / 1024.0;
+    let mut wasm_path = args.wasm.clone();
+    let mut wasm_bytes = fs::read(&wasm_path)?;
+    let mut wasm_size_kb = wasm_bytes.len() as f64 / 1024.0;
+
+    if args.optimize {
+        let optimized_path = args
+            .wasm
+            .with_file_name(format!("{}-optimized.wasm", args.wasm.file_stem().unwrap_or_default().to_string_lossy()));
+        p::header("WASM Optimization");
+        p::kv("Input WASM", &args.wasm.display().to_string());
+        p::kv("Output WASM", &optimized_path.display().to_string());
+        let result = optimizer::optimize_wasm(&args.wasm, &optimized_path)?;
+        wasm_path = optimized_path;
+        wasm_bytes = fs::read(&wasm_path)?;
+        wasm_size_kb = wasm_bytes.len() as f64 / 1024.0;
+        println!();
+        p::success("Optimization pass completed");
+        p::kv("Input size", &format!("{} bytes", result.input_size_bytes));
+        p::kv("Output size", &format!("{} bytes", result.output_size_bytes));
+        p::separator();
+    }
 
     p::separator();
-    p::kv("WASM file", &args.wasm.display().to_string());
+    p::kv("WASM file", &wasm_path.display().to_string());
     p::kv("WASM size", &format!("{:.1} KB", wasm_size_kb));
     p::kv("Network", &args.network);
 
@@ -66,6 +88,7 @@ pub fn handle(args: DeployArgs) -> Result<()> {
             "WASM is {:.1} KB — Soroban limit is 128 KB. Optimize with --release.",
             wasm_size_kb
         ));
+        p::info("If this contract is still too large, use `starforge gas optimize --target <input>.wasm --output <output>.wasm` or external tools such as `wasm-opt -Oz`.");
     }
 
     let cfg = config::load()?;
@@ -158,7 +181,7 @@ pub fn handle(args: DeployArgs) -> Result<()> {
         "Ready! Run this to complete the deployment:".bright_white()
     );
     println!();
-    let deploy_cmd = build_stellar_deploy_command(&args.wasm, &wallet.public_key, &args.network);
+    let deploy_cmd = build_stellar_deploy_command(&wasm_path, &wallet.public_key, &args.network);
     for line in deploy_cmd.lines() {
         println!("  {}", line.cyan());
     }
