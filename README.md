@@ -56,13 +56,15 @@ Validate, size-check, and deploy compiled Soroban `.wasm` files to Testnet or Ma
 ```bash
 git clone https://github.com/YOUR_USERNAME/starforge.git
 cd starforge
-cargo build --release
+cargo build --release --locked
 
 # Move the binary to your PATH
 cp target/release/starforge ~/.local/bin/
 # or on macOS:
 cp target/release/starforge /usr/local/bin/
 ```
+
+**Note:** Using `--locked` ensures reproducible builds by using the exact dependency versions specified in `Cargo.lock`. This is the same approach used in our CI pipeline.
 
 ### Verify installation
 
