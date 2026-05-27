@@ -70,7 +70,7 @@ pub fn handle(cmd: NewCommands) -> Result<()> {
 }
 
 fn search_templates(query: &str) -> Result<()> {
-    let results = templates::search_templates(query)?;
+    let results = templates::search_templates(query, None)?;
     p::header(&format!("Template search results for '{}'", query));
     if results.is_empty() {
         p::info("No templates matched that query.");
