@@ -14,6 +14,8 @@ pub struct TxArgs {
 pub enum TxCommands {
     /// Send a Stellar payment transaction
     Send(SendArgs),
+    /// Submit multiple operations in one transaction from a JSON file
+    Batch(BatchArgs),
     /// Fetch and display recent transactions for a Stellar account
     History {
         /// Account public key
@@ -43,6 +45,22 @@ pub enum TxCommands {
 }
 
 #[derive(Args)]
+pub struct BatchArgs {
+    /// Path to operations JSON file
+    #[arg(long)]
+    pub file: std::path::PathBuf,
+    /// Wallet name to send from
+    #[arg(long)]
+    pub from: String,
+    /// Network to use
+    #[arg(long, default_value = "testnet", value_parser = ["testnet", "mainnet"])]
+    pub network: String,
+    /// Skip confirmation prompt
+    #[arg(long, default_value = "false")]
+    pub yes: bool,
+}
+
+#[derive(Args)]
 pub struct SendArgs {
     /// Wallet name to send from
     #[arg(long)]
@@ -67,6 +85,7 @@ pub struct SendArgs {
 pub fn handle(args: TxArgs) -> Result<()> {
     match args.command {
         TxCommands::Send(args) => handle_send(args),
+        TxCommands::Batch(args) => handle_batch(args),
         TxCommands::History {
             public_key,
             limit,
