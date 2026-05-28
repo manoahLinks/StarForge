@@ -16,4 +16,5 @@ pub mod stream;
 pub mod telemetry;
 pub mod templates;
 pub mod test_runner;
+pub mod tx_batch;
 pub mod tutorial_engine;
