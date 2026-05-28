@@ -45,6 +45,9 @@ pub struct InspectArgs {
     /// Network to use; defaults to the global config network
     #[arg(long, value_parser = ["testnet", "mainnet"])]
     pub network: Option<String>,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args)]
@@ -84,6 +87,11 @@ fn handle_inspect(args: InspectArgs) -> Result<()> {
     println!();
     p::step(1, 1, "Querying contract instance from Soroban RPC…");
     let inspect = soroban::inspect_contract(&args.contract_id, &network)?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&inspect)?);
+        return Ok(());
+    }
 
     println!();
     p::kv_accent("Contract ID", &inspect.contract_id);
@@ -247,10 +255,13 @@ fn handle_invoke(args: InvokeArgs) -> Result<()> {
     if args.submit {
         if let Some(mut wallet) = wallet {
             println!();
-            
+
             if let Some(sk) = &wallet.secret_key {
                 if sk.contains(':') {
-                    let pwd = crypto::prompt_password(&format!("Enter password to decrypt wallet '{}'", wallet.name), false)?;
+                    let pwd = crypto::prompt_password(
+                        &format!("Enter password to decrypt wallet '{}'", wallet.name),
+                        false,
+                    )?;
                     let plain_sk = crypto::decrypt_secret(&pwd, sk)?;
                     wallet.secret_key = Some(plain_sk);
                 }

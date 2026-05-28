@@ -4,8 +4,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use stellar_strkey::{ed25519, Contract};
 use stellar_xdr::curr::{
     AccountId, ContractDataDurability, ContractExecutable, Hash, LedgerEntryData, LedgerKey,
-    LedgerKeyContractData, PublicKey, ScAddress, ScMap, ScString, ScSymbol, ScVal,
-    Uint256,
+    LedgerKeyContractData, PublicKey, ScAddress, ScMap, ScString, ScSymbol, ScVal, Uint256,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -23,7 +22,7 @@ pub struct TransactionResult {
     pub return_value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractInspectResult {
     pub contract_id: String,
     pub executable: String,
@@ -35,7 +34,7 @@ pub struct ContractInspectResult {
     pub instance_storage: Vec<ContractStorageEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractStorageEntry {
     pub key: String,
     pub value: String,
@@ -220,7 +219,7 @@ pub fn upload_wasm(
 pub fn inspect_contract(contract_id: &str, network: &str) -> Result<ContractInspectResult> {
     let ledger_key = build_contract_instance_key(contract_id)?;
     let ledger_key_xdr = ledger_key_to_xdr_base64(&ledger_key)?;
-    
+
     let request = SorobanRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: 1,
@@ -301,7 +300,7 @@ fn ledger_entry_from_xdr_base64(xdr: &str) -> Result<LedgerEntryData> {
     use base64::{engine::general_purpose, Engine as _};
     // Simplified XDR decoding - in production use proper stellar-xdr decoding
     let _decoded = general_purpose::STANDARD.decode(xdr)?;
-    
+
     // For now, return a mock contract data entry
     // In production, properly decode the XDR bytes
     anyhow::bail!("XDR decoding not fully implemented - this is a mock")
@@ -323,7 +322,7 @@ fn parse_contract_inspect_result(
 
     // For now, return a mock result since we can't decode XDR properly yet
     // In production, use: LedgerEntryData::from_xdr(entry.xdr.as_bytes(), Limits::none())?
-    
+
     Ok(ContractInspectResult {
         contract_id: contract_id.to_string(),
         executable: "Wasm".to_string(),

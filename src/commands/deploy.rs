@@ -1,9 +1,11 @@
-use crate::utils::{config, horizon, print as p, soroban};
+use crate::commands::info;
+use crate::utils::{config, horizon, print as p};
 use anyhow::Result;
 use clap::Args;
 use colored::*;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 const SOROBAN_WASM_LIMIT_KB: f64 = 128.0;
 
@@ -21,9 +23,9 @@ pub struct DeployArgs {
     /// Skip confirmation prompt
     #[arg(long, default_value = "false")]
     pub yes: bool,
-    /// Simulate the deploy transaction first and show estimated Soroban fee / errors
+    /// Execute deployment immediately if Stellar CLI is installed
     #[arg(long, default_value = "false")]
-    pub simulate: bool,
+    pub execute: bool,
 }
 
 fn is_wasm_above_size_limit(wasm_size_kb: f64) -> bool {
@@ -44,6 +46,19 @@ fn build_stellar_deploy_command(wasm: &std::path::Path, source: &str, network: &
         source,
         network
     )
+}
+
+fn build_stellar_deploy_args(wasm: &std::path::Path, source: &str, network: &str) -> Vec<String> {
+    vec![
+        "contract".to_string(),
+        "deploy".to_string(),
+        "--wasm".to_string(),
+        wasm.display().to_string(),
+        "--source".to_string(),
+        source.to_string(),
+        "--network".to_string(),
+        network.to_string(),
+    ]
 }
 
 pub fn handle(args: DeployArgs) -> Result<()> {
@@ -183,6 +198,36 @@ pub fn handle(args: DeployArgs) -> Result<()> {
         println!("  {}", line.cyan());
     }
     println!();
+    if args.execute {
+        let stellar_path = info::detect_stellar_cli().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Cannot execute deploy: Stellar CLI not found on PATH.\nInstall it from https://developers.stellar.org/docs/tools/stellar-cli"
+            )
+        })?;
+
+        p::info(&format!(
+            "Executing with Stellar CLI at {}",
+            stellar_path.display()
+        ));
+        let cmd_args = build_stellar_deploy_args(&args.wasm, &wallet.public_key, &args.network);
+        let output = Command::new(stellar_path).args(&cmd_args).output()?;
+        if output.status.success() {
+            p::success("Deployment command executed successfully.");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.trim().is_empty() {
+                println!("{}", stdout.trim());
+            }
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!(
+                "Stellar CLI deployment failed (exit: {}). {}",
+                output.status,
+                stderr.trim()
+            );
+        }
+    } else {
+        p::info("Dry-run mode (default): command not executed. Use --execute to run it.");
+    }
     p::info("Install the Stellar CLI: https://developers.stellar.org/docs/tools/stellar-cli");
     p::separator();
 
@@ -222,6 +267,28 @@ mod tests {
         assert!(command.contains("--wasm target/release/token.wasm"));
         assert!(command.contains("--source GABCDEF1234567890"));
         assert!(command.contains("--network testnet"));
+    }
+
+    #[test]
+    fn builds_expected_deploy_args() {
+        let args = build_stellar_deploy_args(
+            std::path::Path::new("target/release/token.wasm"),
+            "GABCDEF1234567890",
+            "testnet",
+        );
+        assert_eq!(
+            args,
+            vec![
+                "contract",
+                "deploy",
+                "--wasm",
+                "target/release/token.wasm",
+                "--source",
+                "GABCDEF1234567890",
+                "--network",
+                "testnet"
+            ]
+        );
     }
 
     #[test]
