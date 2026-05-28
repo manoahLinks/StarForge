@@ -6,9 +6,39 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TemplateRegistry {
     #[serde(default)]
+    pub version: String,
+    #[serde(default)]
     pub templates: Vec<TemplateEntry>,
 }
 
+/// Describes where a template's source files live.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum TemplateSource {
+    /// Clone from a remote git repository.
+    Git {
+        url: String,
+        #[serde(default)]
+        branch: Option<String>,
+    },
+    /// Copy from a local directory on disk.
+    Local { path: String },
+    /// A built-in template bundled with StarForge.
+    Builtin { id: String },
+}
+
+impl std::fmt::Display for TemplateSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TemplateSource::Git { url, branch } => match branch {
+                Some(b) => write!(f, "git:{} (branch: {})", url, b),
+                None    => write!(f, "git:{}", url),
+            },
+            TemplateSource::Local { path } => write!(f, "local:{}", path),
+            TemplateSource::Builtin { id } => write!(f, "builtin:{}", id),
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TemplateSource {
     Git { url: String, branch: Option<String> },
@@ -92,6 +122,16 @@ fn template_storage_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Returns the user-level templates directory where published templates are stored.
+fn templates_dir() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+    let dir = home.join(".starforge").join("templates").join("local");
+    if !dir.exists() {
+        fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
+    }
+    Ok(dir)
+}
+
 pub fn load_registry() -> Result<TemplateRegistry> {
     let path = registry_path()?;
     if !path.exists() {
@@ -162,6 +202,42 @@ pub fn get_template(name: &str) -> Result<TemplateEntry> {
         .into_iter()
         .find(|t| t.name == name)
         .ok_or_else(|| anyhow::anyhow!("Template '{}' not found in registry", name))
+}
+
+pub fn template_source_content(name: &str) -> Result<Option<String>> {
+    let entry = match get_template(name) {
+        Ok(entry) => entry,
+        Err(_) => return Ok(None),
+    };
+
+    let content = match &entry.source {
+        TemplateSource::Builtin { id } => {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("templates")
+                .join("examples")
+                .join(id)
+                .join("src")
+                .join("lib.rs");
+            if path.exists() {
+                Some(fs::read_to_string(&path)
+                    .with_context(|| format!("Failed to read built-in template at {}", path.display()))?)
+            } else {
+                None
+            }
+        }
+        TemplateSource::Local { path } => {
+            let lib_rs = Path::new(path).join("src").join("lib.rs");
+            if lib_rs.exists() {
+                Some(fs::read_to_string(&lib_rs)
+                    .with_context(|| format!("Failed to read template source at {}", lib_rs.display()))?)
+            } else {
+                None
+            }
+        }
+        TemplateSource::Git { .. } => None,
+    };
+
+    Ok(content)
 }
 
 pub fn add_template(entry: TemplateEntry) -> Result<()> {
@@ -286,7 +362,7 @@ pub fn publish_template(
     author: String,
     tags: Vec<String>,
     version: String,
-) -> Result<()> {
+) -> Result<TemplateEntry> {
     if !template_path.exists() {
         anyhow::bail!("Template path does not exist: {}", template_path.display());
     }
@@ -311,6 +387,7 @@ pub fn publish_template(
         source: TemplateSource::Local {
             path: dest.to_string_lossy().to_string(),
         },
+        path: None,
         created_at: chrono::Utc::now().to_rfc3339(),
         updated_at: chrono::Utc::now().to_rfc3339(),
         downloads: 0,
@@ -318,9 +395,9 @@ pub fn publish_template(
         path: None,
     };
     
-    add_template(entry)?;
+    add_template(entry.clone())?;
     
-    Ok(())
+    Ok(entry)
 }
 
 #[allow(dead_code)]
@@ -358,6 +435,7 @@ mod tests {
             author: "DeFi Team".to_string(),
             tags: vec!["defi".to_string(), "dex".to_string(), "amm".to_string()],
             source: TemplateSource::Builtin { id: "uniswap-v2".to_string() },
+            path: None,
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             downloads: 100,

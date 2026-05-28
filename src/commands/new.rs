@@ -62,8 +62,15 @@ pub fn handle(cmd: NewCommands) -> Result<()> {
     }
 }
 
-fn search_templates(query: &str) -> Result<()> {
-    let results = templates::search_templates(query, None)?;
+fn search_templates(query: &str, tags: Option<&str>) -> Result<()> {
+    let tag_list: Option<Vec<String>> = tags.map(|t| {
+        t.split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    });
+
+    let results = templates::search_templates(query, tag_list.as_deref())?;
     p::header(&format!("Template search results for '{}'", query));
     
     if let Some(ref tags) = tag_list {
