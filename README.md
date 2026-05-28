@@ -58,9 +58,6 @@ git clone https://github.com/YOUR_USERNAME/starforge.git
 cd starforge
 cargo build --release
 
-# Build with hardware wallet support
-cargo build --release --features hardware-wallet
-
 # Move the binary to your PATH
 cp target/release/starforge ~/.local/bin/
 # or on macOS:
@@ -109,12 +106,6 @@ starforge wallet remove alice
 
 # Rotate a wallet but keep the same local name
 starforge wallet rotate alice --fund
-
-# Create a multisig config and also write a setup transaction payload
-starforge wallet multisig create treasury \
-  --threshold 2 \
-  --signers alice,bob,charlie \
-  --xdr-output treasury-setup.json
 ```
 
 Wallet rotation keeps the same local wallet name in `~/.starforge/config.toml`, but it creates a brand-new on-chain Stellar account keypair. Any scripts, signer sets, or deployment flows that referenced the previous public key still need to be updated separately.
@@ -154,8 +145,6 @@ starforge new contract my-contract --interactive
 starforge new contract my-token --template token
 starforge new contract my-nft --template nft
 starforge new contract my-vote --template voting
-starforge new contract my-stable --template stablecoin
-starforge new contract my-escrow --template escrow
 
 # Search marketplace templates
 starforge template search defi
@@ -209,9 +198,6 @@ starforge deploy \
 
 # Skip confirmation prompt (for CI)
 starforge deploy --wasm ./my_contract.wasm --yes
-
-# Simulate the deploy first to inspect estimated Soroban fee / RPC errors
-starforge deploy --wasm ./my_contract.wasm --simulate
 ```
 
 ### Contract commands

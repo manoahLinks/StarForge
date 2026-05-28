@@ -184,6 +184,16 @@ pub struct WalletEntry {
     pub network: String,
     pub created_at: String,
     pub funded: bool,
+    #[serde(default)]
+    pub rotation_history: Vec<WalletRotationRecord>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WalletRotationRecord {
+    pub rotated_at: String,
+    pub previous_public_key: String,
+    pub previous_network: String,
+    pub previous_funded: bool,
 }
 
 impl Default for Config {
@@ -473,3 +483,4 @@ pub fn add_custom_network(
     );
     Ok(())
 }
+
