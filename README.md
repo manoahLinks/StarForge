@@ -58,6 +58,9 @@ git clone https://github.com/YOUR_USERNAME/starforge.git
 cd starforge
 cargo build --release
 
+# Build with hardware wallet support
+cargo build --release --features hardware-wallet
+
 # Move the binary to your PATH
 cp target/release/starforge ~/.local/bin/
 # or on macOS:
@@ -151,6 +154,8 @@ starforge new contract my-contract --interactive
 starforge new contract my-token --template token
 starforge new contract my-nft --template nft
 starforge new contract my-vote --template voting
+starforge new contract my-stable --template stablecoin
+starforge new contract my-escrow --template escrow
 
 # Search marketplace templates
 starforge template search defi
@@ -204,6 +209,9 @@ starforge deploy \
 
 # Skip confirmation prompt (for CI)
 starforge deploy --wasm ./my_contract.wasm --yes
+
+# Simulate the deploy first to inspect estimated Soroban fee / RPC errors
+starforge deploy --wasm ./my_contract.wasm --simulate
 ```
 
 ### Contract commands

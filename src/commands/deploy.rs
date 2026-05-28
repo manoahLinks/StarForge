@@ -1,4 +1,4 @@
-use crate::utils::{config, horizon, print as p};
+use crate::utils::{config, horizon, print as p, soroban};
 use anyhow::Result;
 use clap::Args;
 use colored::*;
@@ -21,6 +21,9 @@ pub struct DeployArgs {
     /// Skip confirmation prompt
     #[arg(long, default_value = "false")]
     pub yes: bool,
+    /// Simulate the deploy transaction first and show estimated Soroban fee / errors
+    #[arg(long, default_value = "false")]
+    pub simulate: bool,
 }
 
 fn is_wasm_above_size_limit(wasm_size_kb: f64) -> bool {
@@ -55,6 +58,7 @@ pub fn handle(args: DeployArgs) -> Result<()> {
 
     let wasm_bytes = fs::read(&args.wasm)?;
     let wasm_size_kb = wasm_bytes.len() as f64 / 1024.0;
+    let wasm_hash = compute_local_wasm_hash(&wasm_bytes);
 
     p::separator();
     p::kv("WASM file", &args.wasm.display().to_string());
@@ -63,7 +67,7 @@ pub fn handle(args: DeployArgs) -> Result<()> {
 
     if is_wasm_above_size_limit(wasm_size_kb) {
         p::warn(&format!(
-            "WASM is {:.1} KB — Soroban limit is 128 KB. Optimize with --release.",
+            "WASM is {:.1} KB - Soroban limit is 128 KB. Optimize with --release.",
             wasm_size_kb
         ));
     }
@@ -94,6 +98,26 @@ pub fn handle(args: DeployArgs) -> Result<()> {
     p::kv("Wallet", &wallet.name);
     p::kv_accent("Public Key", &wallet.public_key);
     p::separator();
+
+    if args.simulate {
+        p::info("Simulating deploy transaction via Soroban RPC...");
+        match soroban::simulate_deploy_transaction(&wasm_hash, &args.network, wallet) {
+            Ok(simulation) => {
+                p::kv("Estimated Fee", &format!("{} stroops", simulation.fee));
+                if !simulation.errors.is_empty() {
+                    for error in &simulation.errors {
+                        p::warn(&format!("Simulation error: {}", error));
+                    }
+                } else {
+                    p::success("Simulation completed without reported RPC errors");
+                }
+            }
+            Err(error) => {
+                p::warn(&format!("Simulation failed: {}", error));
+            }
+        }
+        p::separator();
+    }
 
     if args.network == "mainnet" {
         p::warn("You are deploying to MAINNET. This costs real XLM.");
@@ -138,12 +162,8 @@ pub fn handle(args: DeployArgs) -> Result<()> {
 
     pb.inc(1);
     pb.set_message("Calculating WASM hash...");
-
-    let wasm_hash = compute_local_wasm_hash(&wasm_bytes);
-
     pb.inc(1);
     pb.set_message("Generating stellar CLI command...");
-
     pb.finish_with_message("Deployment preparation complete!");
 
     println!();
@@ -154,7 +174,7 @@ pub fn handle(args: DeployArgs) -> Result<()> {
     p::separator();
     println!(
         "  {} {}",
-        "✓".green().bold(),
+        "âœ“".green().bold(),
         "Ready! Run this to complete the deployment:".bright_white()
     );
     println!();
