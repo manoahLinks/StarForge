@@ -223,7 +223,6 @@ fn scaffold_contract(
     include_tests: bool,
     include_ci: bool,
 ) -> Result<()> {
-    let _ = include_ci;
     let dir = Path::new(&name);
     if dir.exists() {
         anyhow::bail!("Directory '{}' already exists", name);
@@ -265,6 +264,16 @@ fn scaffold_contract(
 
     p::step(4, 4, "Writing README.md…");
     fs::write(dir.join("README.md"), readme(&name, &template, source))?;
+
+    if include_ci {
+        p::info("Adding GitHub Actions CI workflow…");
+        let workflow_dir = dir.join(".github/workflows");
+        fs::create_dir_all(&workflow_dir)?;
+        fs::write(
+            workflow_dir.join("stellar-ci.yml"),
+            stellar_ci_workflow(&name),
+        )?;
+    }
 
     println!();
     p::success(&format!("Contract '{}' scaffolded!", name));
