@@ -7,6 +7,9 @@ pub struct ShellArgs {
     /// Path to the compiled contract .wasm (local sandbox execution)
     #[arg(long)]
     pub contract: String,
+    /// Network to use (docker-testnet runs against local Docker Soroban sandbox)
+    #[arg(long, default_value = "testnet")]
+    pub network: String,
     /// Disable persistent command history
     #[arg(long, default_value = "false")]
     pub no_history: bool,
@@ -19,10 +22,11 @@ pub fn handle(args: ShellArgs) -> Result<()> {
     p::header("Interactive Contract Shell");
     p::separator();
     p::kv("Contract WASM", &args.contract);
+    p::kv("Network", &args.network);
     p::separator();
     println!();
 
-    let sandbox = LocalSorobanSandbox::new(&args.contract)?;
+    let sandbox = LocalSorobanSandbox::new(&args.contract, &args.network)?;
     let runner = ShellRunner { sandbox };
     let mut repl_options = repl::ReplOptions::default();
     repl_options.history_enabled = !args.no_history;

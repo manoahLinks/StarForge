@@ -894,6 +894,28 @@ cargo bench -- --save-baseline my-baseline
 cargo bench -- --baseline my-baseline
 ```
 
+### Running with Docker Soroban Sandbox
+
+The `shell` command supports connecting to a local Soroban sandbox via Docker:
+
+```bash
+# Start the interactive shell against a local Docker Soroban sandbox
+starforge shell --contract ./target/wasm32-unknown-unknown/release/my_contract.wasm --network docker-testnet
+```
+
+When `--network docker-testnet` is used, StarForge:
+1. Ensures the Docker containers defined in `docker-compose.yml` are running (includes `stellar-testnet` and `soroban-rpc`)
+2. Runs contract invocations inside the Docker network where the Soroban RPC is available at `http://soroban-rpc:8000`
+3. Routes all RPC calls through the local sandbox instead of Stellar testnet
+
+The `docker-compose.yml` at the project root defines:
+- **stellar-testnet**: A full Stellar + Soroban RPC node on `localhost:8000`
+- **soroban-rpc**: Dedicated Soroban RPC endpoint on `localhost:8001`
+
+Prerequisites:
+- Docker and docker-compose installed
+- Docker daemon running
+
 ---
 
 ## Debugging
