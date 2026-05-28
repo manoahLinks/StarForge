@@ -179,6 +179,44 @@ pub fn submit_transaction(
     Ok(TransactionResult { hash, return_value })
 }
 
+pub fn upload_wasm(
+    wasm_path: &str,
+    network: &str,
+    wallet: &crate::utils::config::WalletEntry,
+) -> Result<String> {
+    use std::process::Command;
+
+    let rpc_url = get_rpc_url(network);
+
+    let output = Command::new("stellar")
+        .args([
+            "contract",
+            "upload",
+            "--wasm",
+            wasm_path,
+            "--rpc-url",
+            &rpc_url,
+            "--source",
+            &wallet.name,
+            "--network-passphrase",
+            if network == "mainnet" {
+                "Public Global Stellar Network ; September 2015"
+            } else {
+                "Test SDF Network ; September 2015"
+            },
+        ])
+        .output()
+        .context("Failed to run `stellar contract upload`. Is the Stellar CLI installed?")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("WASM upload failed: {}", stderr.trim());
+    }
+
+    let wasm_hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(wasm_hash)
+}
+
 pub fn inspect_contract(contract_id: &str, network: &str) -> Result<ContractInspectResult> {
     let ledger_key = build_contract_instance_key(contract_id)?;
     let ledger_key_xdr = ledger_key_to_xdr_base64(&ledger_key)?;
