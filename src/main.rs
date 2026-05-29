@@ -158,7 +158,7 @@ fn main() {
         Commands::Gas(args) => commands::gas::handle(args),
         Commands::Plugin(args) => commands::plugin::handle(args),
         Commands::Template(args) => commands::template::handle(args),
-        Commands::Upgrade(args) => commands::upgrade::handle(args),
+        Commands::Upgrade(cmd) => commands::upgrade::handle(cmd),
         Commands::Lint(args) => commands::lint::handle(args),
         Commands::External(args) => handle_external_plugin(args),
     };
