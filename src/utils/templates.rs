@@ -306,7 +306,9 @@ pub fn publish_template(
     if !template_path.exists() {
         anyhow::bail!("Template path does not exist: {}", template_path.display());
     }
-    
+
+    validate_template_structure(template_path, &name, &description, &author, &version)?;
+
     let dest = template_storage_dir()?.join(&name);
 
     if dest.exists() {
@@ -334,30 +336,117 @@ pub fn publish_template(
     Ok(())
 }
 
-pub fn validate_template_structure(path: &Path) -> Result<()> {
-    // Check for required files
+pub fn validate_template_structure(
+    path: &Path,
+    name: &str,
+    description: &str,
+    author: &str,
+    version: &str,
+) -> Result<()> {
+    // --- Metadata completeness ---
+    let mut missing: Vec<&str> = Vec::new();
+    if name.trim().is_empty() { missing.push("name"); }
+    if description.trim().is_empty() { missing.push("description"); }
+    if author.trim().is_empty() { missing.push("author"); }
+    if version.trim().is_empty() { missing.push("version"); }
+    if !missing.is_empty() {
+        anyhow::bail!("Missing required metadata fields: {}", missing.join(", "));
+    }
+
+    // --- Required files ---
     let cargo_toml = path.join("Cargo.toml");
     if !cargo_toml.exists() {
         anyhow::bail!("Template must contain Cargo.toml");
     }
-    
+
     let src_dir = path.join("src");
     if !src_dir.exists() || !src_dir.is_dir() {
         anyhow::bail!("Template must contain src/ directory");
     }
-    
+
     let lib_rs = src_dir.join("lib.rs");
     if !lib_rs.exists() {
         anyhow::bail!("Template must contain src/lib.rs");
     }
-    
+
+    // --- Placeholder check ---
+    // Cargo.toml must use {{PROJECT_NAME}} so the scaffolder can substitute it.
+    let cargo_contents = fs::read_to_string(&cargo_toml)
+        .with_context(|| format!("Failed to read {}", cargo_toml.display()))?;
+    if !cargo_contents.contains("{{PROJECT_NAME}}") {
+        anyhow::bail!(
+            "Cargo.toml must contain the {{{{PROJECT_NAME}}}} placeholder so the project name can be substituted"
+        );
+    }
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn make_valid_template(dir: &std::path::Path) {
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("Cargo.toml"), "[package]\nname = \"{{PROJECT_NAME}}\"\nversion = \"0.1.0\"\n").unwrap();
+        fs::write(dir.join("src/lib.rs"), "#![no_std]\n").unwrap();
+    }
+
+    #[test]
+    fn validate_passes_for_valid_template() {
+        let tmp = tempdir().unwrap();
+        make_valid_template(tmp.path());
+        assert!(validate_template_structure(tmp.path(), "my-tpl", "A desc", "Alice", "1.0.0").is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_missing_metadata() {
+        let tmp = tempdir().unwrap();
+        make_valid_template(tmp.path());
+        let err = validate_template_structure(tmp.path(), "", "desc", "author", "1.0.0").unwrap_err();
+        assert!(err.to_string().contains("name"), "should mention missing field");
+
+        let err = validate_template_structure(tmp.path(), "n", "", "author", "1.0.0").unwrap_err();
+        assert!(err.to_string().contains("description"));
+
+        let err = validate_template_structure(tmp.path(), "n", "d", "", "1.0.0").unwrap_err();
+        assert!(err.to_string().contains("author"));
+
+        let err = validate_template_structure(tmp.path(), "n", "d", "a", "").unwrap_err();
+        assert!(err.to_string().contains("version"));
+    }
+
+    #[test]
+    fn validate_rejects_missing_cargo_toml() {
+        let tmp = tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/lib.rs"), "").unwrap();
+        let err = validate_template_structure(tmp.path(), "n", "d", "a", "1.0.0").unwrap_err();
+        assert!(err.to_string().contains("Cargo.toml"));
+    }
+
+    #[test]
+    fn validate_rejects_missing_src_lib() {
+        let tmp = tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"{{PROJECT_NAME}}\"\n").unwrap();
+        let err = validate_template_structure(tmp.path(), "n", "d", "a", "1.0.0").unwrap_err();
+        assert!(err.to_string().contains("src/lib.rs"));
+    }
+
+    #[test]
+    fn validate_rejects_missing_placeholder() {
+        let tmp = tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        // Cargo.toml without {{PROJECT_NAME}}
+        fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"hardcoded\"\n").unwrap();
+        fs::write(tmp.path().join("src/lib.rs"), "").unwrap();
+        let err = validate_template_structure(tmp.path(), "n", "d", "a", "1.0.0").unwrap_err();
+        assert!(err.to_string().contains("PROJECT_NAME"));
+    }
+
     #[test]
     fn test_search_templates() {
         let mut registry = TemplateRegistry::default();
