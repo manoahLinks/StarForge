@@ -2,6 +2,8 @@
 
 Complete reference for all StarForge commands, options, and utilities.
 
+> For a concise, navigable index of every CLI subcommand see [docs/COMMAND_REFERENCE.md](docs/COMMAND_REFERENCE.md).
+
 ## Table of Contents
 
 1. [Command Line Interface](#command-line-interface)
