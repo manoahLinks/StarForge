@@ -1,4 +1,3 @@
-use crate::utils::{config, horizon, optimizer, print as p, info, soroban};
 use crate::commands::info;
 use crate::utils::{config, horizon, optimizer, print as p, soroban};
 use anyhow::Result;

@@ -37,8 +37,6 @@ pub fn handle(cmd: NetworkCommands) -> Result<()> {
     match cmd {
         NetworkCommands::Show => show(),
         NetworkCommands::Switch { network } => switch(network),
-        NetworkCommands::Add { name, horizon_url, soroban_rpc_url, friendbot_url } =>
-            add_network(name, horizon_url, soroban_rpc_url, friendbot_url),
         NetworkCommands::Add {
             name,
             horizon_url,
