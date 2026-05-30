@@ -33,7 +33,6 @@ stellar-xdr = { version = "22.0.0", features = ["serde"] }
 base64     = "0.21"
 urlencoding = "2.1"
 sha2 = "0.10"
-soroban-sdk = { version = "20.5.0" }
 indicatif = "0.17.7"
 libloading = "0.8.1"
 uuid = { version = "1.6.1", features = ["v4"] }
