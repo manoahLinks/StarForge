@@ -69,6 +69,12 @@ pub struct InstalledPlugin {
     /// Trust level assigned at install time.
     #[serde(default)]
     pub trust: TrustLevel,
+    /// Version string reported by the plugin at install time, if available.
+    #[serde(default)]
+    pub version: Option<String>,
+    /// ISO-8601 timestamp of the last successful update or install.
+    #[serde(default)]
+    pub installed_at: Option<String>,
 }
 
 fn registry_path() -> Result<PathBuf> {
@@ -109,14 +115,23 @@ pub fn install_plugin(name: &str, library_path: &Path, source: &str) -> Result<(
     }
 
     let trust = classify_source(source);
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     let mut reg = load_registry().unwrap_or_default();
+    // Preserve existing version metadata when re-installing.
+    let existing_version = reg
+        .plugins
+        .iter()
+        .find(|p| p.name == name)
+        .and_then(|p| p.version.clone());
     reg.plugins.retain(|p| p.name != name);
     reg.plugins.push(InstalledPlugin {
         name: name.to_string(),
         path: library_path.display().to_string(),
         source: source.to_string(),
         trust,
+        version: existing_version,
+        installed_at: Some(now),
     });
     reg.plugins.sort_by(|a, b| a.name.cmp(&b.name));
     save_registry(&reg)?;
