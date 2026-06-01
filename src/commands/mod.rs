@@ -1,5 +1,6 @@
 pub mod benchmark;
 pub mod completions;
+pub mod config;
 pub mod contract;
 pub mod deploy;
 pub mod gas;

@@ -149,6 +149,27 @@ starforge network test
 starforge network test mainnet
 ```
 
+### Configuration commands
+
+```bash
+# Show all configuration settings
+starforge config show
+
+# Get a specific setting
+starforge config get telemetry
+starforge config get network
+
+# Set a configuration value
+starforge config set telemetry false
+starforge config set network mainnet
+```
+
+Common settings:
+- **telemetry**: Enable/disable anonymous usage telemetry (`true` or `false`)
+- **network**: Set the default network (`testnet`, `mainnet`, or custom network name)
+
+For privacy information, see [Telemetry & Privacy](#telemetry--privacy).
+
 ### Scaffold commands
 
 ```bash
@@ -335,9 +356,29 @@ cargo test
 
 Generate this value outside the codebase using your preferred secure workflow, such as a local Stellar key generation command or an existing throwaway test wallet. The key should live only in your shell environment or secret manager, not in source control.
 
----
+### Telemetry & Privacy
 
-## Contract Templates
+starforge collects **anonymous telemetry** to help us improve the CLI. **No personal data is collected** — only command names, success/failure status, and execution time.
+
+#### Disable Telemetry
+
+If you prefer not to participate:
+
+```bash
+# Permanently disable telemetry
+starforge config set telemetry false
+
+# Or use an environment variable (useful for CI/CD)
+export STARFORGE_TELEMETRY=0
+```
+
+**What's collected**: Command name, timestamp, success status, duration (milliseconds), and a random anonymous ID.
+
+**What's NOT collected**: Wallet addresses, secret keys, contract code, configuration values, error messages, or personal information.
+
+For detailed information, see [TELEMETRY_PRIVACY.md](./TELEMETRY_PRIVACY.md).
+
+---
 
 | Template | Description |
 |----------|-------------|

@@ -56,6 +56,9 @@ enum Commands {
     Deploy(commands::deploy::DeployArgs),
     /// Show starforge config and environment info
     Info,
+    /// Manage starforge configuration (telemetry, network)
+    #[command(subcommand)]
+    Config(commands::config::ConfigCommands),
 
     Tx(commands::tx::TxArgs), // fetch transaction for the account
 
@@ -129,6 +132,7 @@ fn main() {
         Commands::Inspect(_) => "inspect",
         Commands::Deploy(_) => "deploy",
         Commands::Info => "info",
+        Commands::Config(_) => "config",
         Commands::Tx(_) => "tx",
         Commands::Network(_) => "network",
         Commands::Node(_) => "node",
@@ -155,6 +159,7 @@ fn main() {
         Commands::Inspect(cmd) => commands::inspect::handle(cmd),
         Commands::Deploy(args) => commands::deploy::handle(args),
         Commands::Info => commands::info::handle(),
+        Commands::Config(cmd) => commands::config::handle_config(cmd),
         Commands::Tx(args) => commands::tx::handle(args),
         Commands::Network(cmd) => commands::network::handle(cmd),
         Commands::Node(cmd) => commands::node::handle(cmd),

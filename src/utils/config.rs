@@ -354,6 +354,10 @@ pub fn get_data_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
+pub fn get_config_path() -> Result<PathBuf> {
+    Ok(config_path())
+}
+
 pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
