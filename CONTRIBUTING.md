@@ -290,6 +290,8 @@ Then open a Pull Request on GitHub. Use the provided template and follow the che
 
 ## Code Quality
 
+StarForge enforces consistent code quality through automated CI checks. See [CI_ENFORCEMENT.md](CI_ENFORCEMENT.md) for full details.
+
 ### Formatting
 
 Use Rust's built-in formatter:
@@ -298,21 +300,41 @@ Use Rust's built-in formatter:
 cargo fmt --all
 ```
 
-This is automatically checked in CI.
+This is automatically checked in CI. All code must pass `cargo fmt --all --check`.
+
+**Pre-commit tip**: Format before every commit:
+```bash
+cargo fmt --all && git add .
+```
 
 ### Linting
 
 Use Clippy to catch common mistakes:
 
 ```bash
-cargo clippy -- -D warnings
+cargo clippy --locked -- -D warnings
 ```
 
-Fix any warnings before submitting a PR.
+Fix any warnings before submitting a PR. All code must pass this check in CI.
+
+**Pre-commit tip**: Run locally before pushing:
+```bash
+cargo clippy --locked -- -D warnings
+```
+
+### Code Style Standards
+
+For detailed code style expectations, see [CODE_STYLE_STANDARDS.md](CODE_STYLE_STANDARDS.md). This covers:
+
+- Naming conventions (functions, variables, constants, types)
+- Documentation requirements
+- Error handling patterns
+- Testing expectations
+- Common Clippy violations and how to fix them
 
 ### Documentation
 
-- Add doc comments to public functions:
+- Add doc comments to all public functions and types:
 
 ```rust
 /// Brief description of what this function does.
@@ -336,6 +358,20 @@ pub fn my_function(arg1: i32) -> i32 {
 ```
 
 - Keep README and other docs up-to-date with your changes
+- Update CHANGELOG if your change is user-facing
+
+### Pre-Commit Validation
+
+Run this before every commit to catch issues early:
+
+```bash
+cargo fmt --all && \
+  cargo build --locked && \
+  cargo test --locked && \
+  cargo clippy --locked -- -D warnings
+```
+
+All of these are checked in CI.
 
 ---
 

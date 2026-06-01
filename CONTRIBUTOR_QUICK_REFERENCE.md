@@ -35,23 +35,42 @@ cargo test
 
 ## Before Submitting a PR
 
-```bash
-# 1. Run all tests
-cargo test
+The CI pipeline checks these things. Verify locally first:
 
-# 2. Format your code
+```bash
+# 1. Format your code (required)
 cargo fmt --all
 
-# 3. Check for linting issues
-cargo clippy -- -D warnings
+# 2. Run all tests (required)
+cargo test --locked
 
-# 4. Verify the app runs
+# 3. Check for linting issues (required)
+cargo clippy --locked -- -D warnings
+
+# 4. Check dependency security (required in CI)
+cargo deny check
+
+# 5. Verify smoke tests pass
+cargo test --test cli_smoke --locked
+
+# 6. Verify the app runs
 cargo run -- --version
 
-# 5. Commit and push
+# 7. Commit and push
 git add .
 git commit -m "feat: your change"
 git push origin feat/issue-XXX-description
+```
+
+All together (simulates CI):
+```bash
+cargo fmt --all --check && \
+  cargo deny check && \
+  cargo build --locked && \
+  cargo test --locked && \
+  cargo clippy --locked -- -D warnings && \
+  cargo test --test cli_smoke --locked && \
+  echo "✅ All CI checks passed!"
 ```
 
 ## Project Structure
@@ -213,6 +232,10 @@ pub fn function(param1: i32) -> i32 {
 ## Resources
 
 - **CONTRIBUTING.md** — Full contribution guide
+- **CI_ENFORCEMENT.md** — CI pipeline and code quality enforcement
+- **CODE_STYLE_STANDARDS.md** — Detailed code style and linting rules
+- **BUILD_BASELINE_VERIFICATION.md** — Project build status verification
+- **BUILD_TROUBLESHOOTING.md** — Solutions for build issues
 - **DEVELOPER_GUIDE.md** — In-depth development documentation
 - **README.md** — Project overview
 - **API_REFERENCE.md** — Complete command reference
