@@ -1,4 +1,4 @@
-use crate::utils::{config, crypto, hardware_wallet, horizon, mnemonic, multisig, print as p};
+use crate::utils::{config, confirmation, crypto, hardware_wallet, horizon, mnemonic, multisig, print as p};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::Subcommand;
@@ -877,26 +877,39 @@ fn merge_wallet(
         &format!("{:.7} XLM", tx_result.fee as f64 / 10_000_000.0),
     );
 
-    if !skip_confirm {
-        println!();
-        p::warn(&format!(
-            "Account '{}' ({}) will be closed and remaining XLM sent to {}.",
-            wallet.name, wallet.public_key, destination
-        ));
-        print!(
-            "  Type the source wallet name ({}) to confirm merge: ",
-            wallet.name
-        );
-        use std::io::BufRead;
-        let line = std::io::stdin()
-            .lock()
-            .lines()
-            .next()
-            .unwrap_or(Ok(String::new()))?;
-        if line.trim() != wallet.name {
-            p::info("Account merge cancelled.");
-            return Ok(());
-        }
+    // Build operation summary for confirmation
+    let risk_level = if network == "mainnet" {
+        confirmation::RiskLevel::High
+    } else {
+        confirmation::RiskLevel::Medium
+    };
+
+    let summary = confirmation::OperationSummary::new(
+        "Account Merge".to_string(),
+        network.clone(),
+        risk_level,
+    )
+    .add("Source Wallet", &wallet.name)
+    .add("Source Address", &wallet.public_key)
+    .add("Destination", &destination)
+    .add("XLM to Transfer", &format!("{:.7} XLM (minus fee)", xlm_balance))
+    .add("Estimated Fee", &format!("{:.7} XLM", tx_result.fee as f64 / 10_000_000.0))
+    .add("Remove Local", if remove_local { "Yes" } else { "No" });
+
+    let confirm_config = confirmation::ConfirmationConfig {
+        risk_level,
+        network: network.clone(),
+        skip_confirm: skip_confirm,
+        dry_run: false,
+        prompt: Some(&format!(
+            "Type '{}' to confirm merge of account {}:",
+            wallet.name, wallet.name
+        )),
+        require_type_confirmation: true, // Always require type confirmation for merge
+    };
+
+    if !confirmation::confirm_operation(&summary, &confirm_config)? {
+        return Ok(());
     }
 
     println!();
