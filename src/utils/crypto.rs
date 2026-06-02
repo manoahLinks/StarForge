@@ -94,12 +94,21 @@ pub struct StrengthReport {
     pub suggestion: Option<String>,
     /// Warning from zxcvbn, if any.
     pub warning: Option<String>,
+    /// True when the passphrase repeats caller-provided wallet/account context.
+    pub reused_context: bool,
 }
 
 /// Evaluate passphrase strength using zxcvbn.
 ///
 /// Returns `Err` if the passphrase is shorter than [`MIN_PASSPHRASE_LEN`].
 pub fn check_passphrase_strength(passphrase: &str) -> Result<StrengthReport> {
+    check_passphrase_strength_with_inputs(passphrase, &[])
+}
+
+pub fn check_passphrase_strength_with_inputs(
+    passphrase: &str,
+    user_inputs: &[&str],
+) -> Result<StrengthReport> {
     if passphrase.len() < MIN_PASSPHRASE_LEN {
         anyhow::bail!(
             "Passphrase must be at least {} characters long (got {}).",
@@ -108,7 +117,7 @@ pub fn check_passphrase_strength(passphrase: &str) -> Result<StrengthReport> {
         );
     }
 
-    let estimate = zxcvbn(passphrase, &[]);
+    let estimate = zxcvbn(passphrase, user_inputs);
     let strength = PassphraseStrength::from_score(estimate.score().into());
 
     let feedback = estimate.feedback();
@@ -125,6 +134,19 @@ pub fn check_passphrase_strength(passphrase: &str) -> Result<StrengthReport> {
         strength,
         suggestion,
         warning,
+        reused_context: reuses_context(passphrase, user_inputs),
+    })
+}
+
+fn reuses_context(passphrase: &str, user_inputs: &[&str]) -> bool {
+    let passphrase = passphrase.trim().to_lowercase();
+    if passphrase.is_empty() {
+        return false;
+    }
+
+    user_inputs.iter().any(|input| {
+        let input = input.trim().to_lowercase();
+        input.len() >= 4 && (passphrase == input || passphrase.contains(&input))
     })
 }
 
@@ -150,6 +172,14 @@ fn print_strength_hint(report: &StrengthReport) {
 ///   below [`STRICT_MIN_SCORE`] (i.e. anything weaker than "Strong").
 /// - Loops until the user provides an acceptable passphrase.
 pub fn prompt_passphrase(prompt: &str, strict: bool) -> Result<String> {
+    prompt_passphrase_with_inputs(prompt, strict, &[])
+}
+
+pub fn prompt_passphrase_with_inputs(
+    prompt: &str,
+    strict: bool,
+    user_inputs: &[&str],
+) -> Result<String> {
     loop {
         // Prompt without confirmation first so we can evaluate strength before
         // asking the user to type it a second time.
@@ -163,7 +193,7 @@ pub fn prompt_passphrase(prompt: &str, strict: bool) -> Result<String> {
             continue;
         }
 
-        match check_passphrase_strength(&pwd) {
+        match check_passphrase_strength_with_inputs(&pwd, user_inputs) {
             Err(e) => {
                 // Length check failed
                 eprintln!("  {}", format!("✗ {}", e).red());
@@ -180,6 +210,13 @@ pub fn prompt_passphrase(prompt: &str, strict: bool) -> Result<String> {
             Ok(report) => {
                 print_strength_hint(&report);
 
+                if report.reused_context {
+                    eprintln!(
+                        "  {}",
+                        "Warning: this passphrase reuses wallet or account details.".yellow()
+                    );
+                }
+
                 if strict && report.strength.score() < STRICT_MIN_SCORE {
                     eprintln!(
                         "  {}",
@@ -194,6 +231,15 @@ pub fn prompt_passphrase(prompt: &str, strict: bool) -> Result<String> {
                 }
 
                 // Strength is acceptable — now ask for confirmation.
+                if strict && report.reused_context {
+                    eprintln!(
+                        "  {}",
+                        "Passphrase must not reuse wallet or account details in --strict mode."
+                            .red()
+                    );
+                    continue;
+                }
+
                 let confirm = Password::new()
                     .with_prompt("Confirm passphrase")
                     .interact()
@@ -446,6 +492,22 @@ mod tests {
             "expected weak score, got {}",
             report.strength.score()
         );
+    }
+
+    #[test]
+    fn detects_passphrase_reusing_wallet_context() {
+        let report =
+            check_passphrase_strength_with_inputs("alice-stronger-passphrase", &["alice"])
+                .unwrap();
+        assert!(report.reused_context);
+    }
+
+    #[test]
+    fn does_not_flag_unrelated_passphrase_as_reused() {
+        let report =
+            check_passphrase_strength_with_inputs("orchid-river-copper-harbor", &["alice"])
+                .unwrap();
+        assert!(!report.reused_context);
     }
 
     #[test]
