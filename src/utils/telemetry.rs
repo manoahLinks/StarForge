@@ -14,6 +14,13 @@ pub struct TelemetryData {
 }
 
 pub fn track_event(event: &str, properties: serde_json::Value) -> Result<()> {
+    // Check environment variable first (opt out if false or 0)
+    if let Ok(val) = std::env::var("STARFORGE_TELEMETRY") {
+        if val == "false" || val == "0" {
+            return Ok(());
+        }
+    }
+
     let cfg = config::load()?;
 
     // Check if telemetry is enabled (default to true, but respect opt-out)
@@ -30,8 +37,8 @@ pub fn track_event(event: &str, properties: serde_json::Value) -> Result<()> {
         anonymous_id,
     };
 
-    // In a real app, we would send this to a service.
-    // For now, we'll log it to a local file in the data directory.
+    // Telemetry is saved ONLY locally in the data directory.
+    // Absolutely NO network requests are made for telemetry transmission.
     save_telemetry_locally(&data)?;
 
     Ok(())

@@ -381,10 +381,13 @@ fn update(name: Option<String>, yes: bool) -> Result<()> {
 
             match status {
                 Ok(s) if s.success() => {
-                    // Re-discover commands from the updated library.
-                    let cmds = discover_commands_from_library(&pl.path)
-                        .unwrap_or_else(|_| pl.commands.clone());
-                    registry::install_plugin(&pl.name, std::path::Path::new(&pl.path), &pl.source, &pl.starforge_version, &pl.plugin_version, cmds)?;
+                    registry::install_plugin(
+                        &pl.name,
+                        std::path::Path::new(&pl.path),
+                        &pl.source,
+                        &pl.starforge_version,
+                        &pl.plugin_version,
+                    )?;
                     p::success(&format!("  '{}' updated via cargo install", pl.name));
                     updated += 1;
                 }
@@ -416,7 +419,7 @@ fn update(name: Option<String>, yes: bool) -> Result<()> {
                         })
                         .unwrap_or(0);
 
-                    let installed_epoch = 0u64; // no install timestamp stored; treat as always-stale
+                    let installed_epoch = 0;
 
                     if modified > installed_epoch {
                         // Library on disk is newer — refresh the registry entry.
@@ -428,7 +431,6 @@ fn update(name: Option<String>, yes: bool) -> Result<()> {
                             &pl.source,
                             &pl.starforge_version,
                             &pl.plugin_version,
-                            cmds,
                         )?;
                         p::success(&format!(
                             "  '{}' library on disk is newer — registry refreshed.",

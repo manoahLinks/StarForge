@@ -103,9 +103,13 @@ enum Commands {
     /// Static analysis and linting for Soroban contracts
     Lint(commands::lint::LintArgs),
 
-    /// Display the full command tree (all top-level commands, subcommands, and plugin extensions)
-    #[command(name = "commands")]
-    CommandTree,
+    /// Manage configuration settings
+    #[command(subcommand)]
+    Config(commands::config::ConfigCommands),
+
+    /// Manage telemetry settings
+    #[command(subcommand)]
+    Telemetry(commands::telemetry::TelemetryCommands),
 
     /// Execute an installed plugin command (e.g. `starforge defi ...`)
     #[command(external_subcommand)]
@@ -147,7 +151,8 @@ fn main() {
         Commands::Template(_) => "template",
         Commands::Upgrade(_) => "upgrade",
         Commands::Lint(_) => "lint",
-        Commands::CommandTree => "commands",
+        Commands::Config(_) => "config",
+        Commands::Telemetry(_) => "telemetry",
         Commands::External(_) => "external",
     }
     .to_string();
@@ -174,7 +179,8 @@ fn main() {
         Commands::Template(args) => commands::template::handle(args),
         Commands::Upgrade(cmd) => commands::upgrade::handle(cmd),
         Commands::Lint(args) => commands::lint::handle(args),
-        Commands::CommandTree => commands::command_tree::handle(),
+        Commands::Config(cmd) => commands::config::handle(cmd),
+        Commands::Telemetry(cmd) => commands::telemetry::handle(cmd),
         Commands::External(args) => handle_external_plugin(args),
     };
     let duration = start.elapsed();

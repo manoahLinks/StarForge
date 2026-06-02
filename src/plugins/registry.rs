@@ -170,7 +170,6 @@ pub fn install_plugin(
     }
 
     let trust = classify_source(source);
-
     let mut reg = load_registry().unwrap_or_default();
     reg.plugins.retain(|p| p.name != name);
     reg.plugins.push(InstalledPlugin {
