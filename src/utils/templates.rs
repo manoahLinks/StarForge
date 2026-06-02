@@ -334,6 +334,101 @@ fn registry_path() -> Result<PathBuf> {
     Ok(dir.join("registry.json"))
 }
 
+/// Returns true if the path looks like a supported template archive.
+pub fn is_archive_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("zip"))
+        .unwrap_or(false)
+}
+
+/// Extract a `.zip` template package into `dest`, guarding against zip-slip paths.
+pub fn extract_zip_archive(archive: &Path, dest: &Path) -> Result<()> {
+    use zip::ZipArchive;
+
+    if !dest.exists() {
+        fs::create_dir_all(dest)?;
+    }
+
+    let file = fs::File::open(archive)
+        .with_context(|| format!("Failed to open archive {}", archive.display()))?;
+    let mut archive = ZipArchive::new(file)
+        .with_context(|| format!("Failed to read ZIP archive {}", archive.display()))?;
+
+    let dest_canon = dest
+        .canonicalize()
+        .unwrap_or_else(|_| dest.to_path_buf());
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        let entry_path = match entry.enclosed_name() {
+            Some(p) => p.to_path_buf(),
+            None => continue,
+        };
+
+        let out_path = dest_canon.join(&entry_path);
+        if !out_path.starts_with(&dest_canon) {
+            anyhow::bail!(
+                "Archive entry '{}' escapes the destination directory (zip-slip)",
+                entry_path.display()
+            );
+        }
+
+        if entry.name().ends_with('/') {
+            fs::create_dir_all(&out_path)?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut outfile = fs::File::create(&out_path)?;
+            std::io::copy(&mut entry, &mut outfile)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// If `path` is a single top-level directory, return that directory; otherwise `path`.
+pub fn normalize_template_root(path: &Path) -> Result<PathBuf> {
+    if !path.is_dir() {
+        return Ok(path.to_path_buf());
+    }
+    let mut entries = fs::read_dir(path)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name();
+            name != ".git" && name != "__MACOSX" && !name.to_string_lossy().starts_with('.')
+        })
+        .collect::<Vec<_>>();
+
+    entries.retain(|e| {
+        let n = e.file_name();
+        n != ".DS_Store"
+    });
+
+    if entries.len() == 1 && entries[0].path().is_dir() {
+        return Ok(entries[0].path());
+    }
+    Ok(path.to_path_buf())
+}
+
+/// Resolve a template path: directories are used as-is; ZIP archives are extracted to a temp dir.
+pub fn resolve_template_source(path: &Path) -> Result<(PathBuf, Option<tempfile::TempDir>)> {
+    if is_archive_path(path) {
+        let temp = tempfile::tempdir().context("Failed to create temp dir for archive extraction")?;
+        extract_zip_archive(path, temp.path())?;
+        let root = normalize_template_root(temp.path())?;
+        Ok((root, Some(temp)))
+    } else if path.is_dir() {
+        Ok((path.to_path_buf(), None))
+    } else {
+        anyhow::bail!(
+            "Template path must be a directory or .zip archive: {}",
+            path.display()
+        );
+    }
+}
+
 fn template_storage_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
     let dir = home.join(".starforge").join("templates").join("storage");
@@ -839,10 +934,37 @@ pub fn publish_template(
         version,
         None,
         None,
+        None,
+        None,
+        None,
+        None,
     )
 }
 
 /// Like `publish_template` but also records optional CLI version constraints.
+/// Install a template from a directory or `.zip` archive into the local registry.
+pub fn install_template_package(
+    package_path: &Path,
+    name: String,
+    description: String,
+    author: String,
+    tags: Vec<String>,
+    version: String,
+    cli_version_min: Option<String>,
+    cli_version_max: Option<String>,
+) -> Result<()> {
+    publish_template_versioned(
+        package_path,
+        name,
+        description,
+        author,
+        tags,
+        version,
+        cli_version_min,
+        cli_version_max,
+    )
+}
+
 pub fn publish_template_versioned(
     template_path: &Path,
     name: String,
@@ -852,12 +974,18 @@ pub fn publish_template_versioned(
     version: String,
     cli_version_min: Option<String>,
     cli_version_max: Option<String>,
+    license: Option<String>,
+    repository: Option<String>,
+    homepage: Option<String>,
+    documentation: Option<String>,
 ) -> Result<()> {
     if !template_path.exists() {
         anyhow::bail!("Template path does not exist: {}", template_path.display());
     }
 
-    validate_template_structure(template_path, &name, &description, &author, &version)?;
+    let (source_root, _temp_guard) = resolve_template_source(template_path)?;
+
+    validate_template_structure(&source_root, &name, &description, &author, &version)?;
 
     let dest = template_storage_dir()?.join(&name);
 
@@ -868,7 +996,7 @@ pub fn publish_template_versioned(
         );
     }
 
-    copy_dir_recursive(template_path, &dest)?;
+    copy_dir_recursive(&source_root, &dest)?;
 
     let entry = TemplateEntry {
         name: name.clone(),
@@ -886,7 +1014,7 @@ pub fn publish_template_versioned(
         updated_at: String::new(),
         cli_version_min,
         cli_version_max,
-        documented: template_path.join("README.md").exists(),
+        documented: source_root.join("README.md").exists(),
         maintenance: MaintenanceStatus::Active,
         license: None,
         repository_url: None,
@@ -904,7 +1032,25 @@ pub fn validate_template_structure(
     author: &str,
     version: &str,
 ) -> Result<()> {
-    // --- Metadata completeness ---
+    validate_template_structure_with_constraints(path, name, description, author, version, None, None)
+}
+
+/// Full validation including optional CLI version constraint format checks.
+///
+/// Called by `publish_template_versioned` so that every publish request is
+/// audited before any file is written to the registry or storage directory.
+/// Errors are actionable: they name the missing or invalid field/file and
+/// explain what the author must fix.
+pub fn validate_template_structure_with_constraints(
+    path: &Path,
+    name: &str,
+    description: &str,
+    author: &str,
+    version: &str,
+    cli_version_min: Option<&str>,
+    cli_version_max: Option<&str>,
+) -> Result<()> {
+    // --- 1. Metadata completeness ---
     let mut missing: Vec<&str> = Vec::new();
     if name.trim().is_empty() {
         missing.push("name");
@@ -919,32 +1065,94 @@ pub fn validate_template_structure(
         missing.push("version");
     }
     if !missing.is_empty() {
-        anyhow::bail!("Missing required metadata fields: {}", missing.join(", "));
+        anyhow::bail!(
+            "Missing required metadata fields: {}.\n\
+             Provide these fields via CLI flags (--name, --description, --author, --version).",
+            missing.join(", ")
+        );
     }
 
-    // --- Required files ---
+    // --- 2. Version string format ---
+    if parse_semver(version).is_err() {
+        anyhow::bail!(
+            "Version '{}' is not valid semver (expected major.minor.patch, e.g. \"1.0.0\").",
+            version
+        );
+    }
+
+    // --- 3. CLI version constraints format (if provided) ---
+    if let Some(min) = cli_version_min {
+        if parse_semver(min).is_err() {
+            anyhow::bail!(
+                "cli_version_min '{}' is not valid semver (expected major.minor.patch, e.g. \"0.1.0\").",
+                min
+            );
+        }
+    }
+    if let Some(max) = cli_version_max {
+        if parse_semver(max).is_err() {
+            anyhow::bail!(
+                "cli_version_max '{}' is not valid semver (expected major.minor.patch, e.g. \"1.99.99\").",
+                max
+            );
+        }
+    }
+    if let (Some(min), Some(max)) = (cli_version_min, cli_version_max) {
+        if let (Ok(min_v), Ok(max_v)) = (parse_semver(min), parse_semver(max)) {
+            if min_v > max_v {
+                anyhow::bail!(
+                    "cli_version_min '{}' is greater than cli_version_max '{}'. \
+                     Fix the version bounds so that min <= max.",
+                    min, max
+                );
+            }
+        }
+    }
+
+    // --- 4. Required files ---
     let cargo_toml = path.join("Cargo.toml");
     if !cargo_toml.exists() {
-        anyhow::bail!("Template must contain Cargo.toml");
+        anyhow::bail!(
+            "Template is missing Cargo.toml.\n\
+             A valid StarForge template must be a Rust crate with a Cargo.toml at its root."
+        );
     }
 
     let src_dir = path.join("src");
     if !src_dir.exists() || !src_dir.is_dir() {
-        anyhow::bail!("Template must contain src/ directory");
+        anyhow::bail!(
+            "Template is missing the src/ directory.\n\
+             A valid StarForge template must contain src/ with at least lib.rs."
+        );
     }
 
     let lib_rs = src_dir.join("lib.rs");
     if !lib_rs.exists() {
-        anyhow::bail!("Template must contain src/lib.rs");
+        anyhow::bail!(
+            "Template is missing src/lib.rs.\n\
+             Soroban contracts must define their entry points in src/lib.rs."
+        );
     }
 
-    // --- Placeholder check ---
+    // --- 5. README presence ---
+    let readme = path.join("README.md");
+    if !readme.exists() {
+        anyhow::bail!(
+            "Template is missing README.md.\n\
+             A README is required so users know how to use the template. \
+             Add a README.md explaining the template purpose, usage, and any configuration."
+        );
+    }
+
+    // --- 6. Placeholder check ---
     // Cargo.toml must use {{PROJECT_NAME}} so the scaffolder can substitute it.
     let cargo_contents = fs::read_to_string(&cargo_toml)
         .with_context(|| format!("Failed to read {}", cargo_toml.display()))?;
     if !cargo_contents.contains("{{PROJECT_NAME}}") {
         anyhow::bail!(
-            "Cargo.toml must contain the {{{{PROJECT_NAME}}}} placeholder so the project name can be substituted"
+            "Cargo.toml must contain the {{{{PROJECT_NAME}}}} placeholder.\n\
+             This placeholder is replaced with the actual project name during scaffolding. \
+             Replace the hardcoded package name with {{{{PROJECT_NAME}}}}."
         );
     }
 
@@ -1238,6 +1446,61 @@ mod tests {
         )
         .unwrap();
         fs::write(dir.join("src/lib.rs"), "#![no_std]\n").unwrap();
+        fs::write(dir.join("README.md"), "# Template\n").unwrap();
+    }
+
+    #[test]
+    fn extract_zip_archive_and_validate() {
+        use zip::write::FileOptions;
+        use zip::ZipWriter;
+
+        let tmp = tempdir().unwrap();
+        let tpl_dir = tmp.path().join("inner");
+        make_valid_template(&tpl_dir);
+
+        let zip_path = tmp.path().join("package.zip");
+        let file = fs::File::create(&zip_path).unwrap();
+        let mut zip = ZipWriter::new(file);
+        let options = FileOptions::default();
+
+        for entry in walkdir_flat(&tpl_dir) {
+            let rel = entry.strip_prefix(&tpl_dir).unwrap();
+            let name = rel.to_string_lossy().replace('\\', "/");
+            if entry.is_dir() {
+                zip.add_directory(format!("{}/", name), options)
+                    .unwrap();
+            } else {
+                zip.start_file(name, options).unwrap();
+                let mut f = fs::File::open(entry).unwrap();
+                std::io::copy(&mut f, &mut zip).unwrap();
+            }
+        }
+        zip.finish().unwrap();
+
+        let extract_dir = tmp.path().join("out");
+        extract_zip_archive(&zip_path, &extract_dir).unwrap();
+        let root = normalize_template_root(&extract_dir).unwrap();
+        assert!(
+            validate_template_structure(&root, "zip-tpl", "desc", "author", "1.0.0").is_ok()
+        );
+    }
+
+    fn walkdir_flat(dir: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            if d.is_dir() {
+                for entry in fs::read_dir(&d).unwrap() {
+                    let p = entry.unwrap().path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else {
+                        out.push(p);
+                    }
+                }
+            }
+        }
+        out
     }
 
     #[test]
@@ -1275,6 +1538,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(tmp.path().join("src/lib.rs"), "").unwrap();
+        fs::write(tmp.path().join("README.md"), "# T").unwrap();
         let err = validate_template_structure(tmp.path(), "n", "d", "a", "1.0.0").unwrap_err();
         assert!(err.to_string().contains("Cargo.toml"));
     }
@@ -1288,6 +1552,7 @@ mod tests {
             "[package]\nname = \"{{PROJECT_NAME}}\"\n",
         )
         .unwrap();
+        fs::write(tmp.path().join("README.md"), "# T").unwrap();
         let err = validate_template_structure(tmp.path(), "n", "d", "a", "1.0.0").unwrap_err();
         assert!(err.to_string().contains("src/lib.rs"));
     }
@@ -1303,8 +1568,76 @@ mod tests {
         )
         .unwrap();
         fs::write(tmp.path().join("src/lib.rs"), "").unwrap();
+        fs::write(tmp.path().join("README.md"), "# T").unwrap();
         let err = validate_template_structure(tmp.path(), "n", "d", "a", "1.0.0").unwrap_err();
         assert!(err.to_string().contains("PROJECT_NAME"));
+    }
+
+    #[test]
+    fn validate_rejects_missing_readme() {
+        let tmp = tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"{{PROJECT_NAME}}\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(tmp.path().join("src/lib.rs"), "").unwrap();
+        // Deliberately no README.md
+        let err = validate_template_structure(tmp.path(), "n", "d", "a", "1.0.0").unwrap_err();
+        assert!(
+            err.to_string().contains("README"),
+            "error should mention README"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_bad_version_semver() {
+        let tmp = tempdir().unwrap();
+        make_valid_template(tmp.path());
+        let err =
+            validate_template_structure(tmp.path(), "n", "d", "a", "not-semver").unwrap_err();
+        assert!(err.to_string().contains("semver") || err.to_string().contains("not-semver"));
+    }
+
+    #[test]
+    fn validate_rejects_bad_cli_version_min() {
+        let tmp = tempdir().unwrap();
+        make_valid_template(tmp.path());
+        let err = validate_template_structure_with_constraints(
+            tmp.path(),
+            "n",
+            "d",
+            "a",
+            "1.0.0",
+            Some("bad"),
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("cli_version_min"),
+            "error should mention cli_version_min"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_min_greater_than_max() {
+        let tmp = tempdir().unwrap();
+        make_valid_template(tmp.path());
+        let err = validate_template_structure_with_constraints(
+            tmp.path(),
+            "n",
+            "d",
+            "a",
+            "1.0.0",
+            Some("2.0.0"),
+            Some("1.0.0"),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("greater than"),
+            "error should explain min > max"
+        );
     }
 
     #[test]

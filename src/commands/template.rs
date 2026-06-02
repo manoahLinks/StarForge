@@ -30,6 +30,32 @@ pub enum TemplateCommands {
         /// Template name
         name: String,
     },
+    /// Install a template from a directory or .zip archive into the local registry
+    Install {
+        /// Path to template directory or .zip package
+        path: PathBuf,
+        /// Template name (defaults to directory/archive stem)
+        #[arg(long)]
+        name: Option<String>,
+        /// Template description
+        #[arg(long)]
+        description: Option<String>,
+        /// Author name
+        #[arg(long)]
+        author: Option<String>,
+        /// Tags (comma-separated)
+        #[arg(long)]
+        tags: Option<String>,
+        /// Version
+        #[arg(long, default_value = "1.0.0")]
+        version: String,
+        /// Minimum StarForge CLI version required
+        #[arg(long)]
+        cli_version_min: Option<String>,
+        /// Maximum StarForge CLI version supported
+        #[arg(long)]
+        cli_version_max: Option<String>,
+    },
     /// Publish a template to the local marketplace
     Publish {
         /// Path to the template directory
@@ -55,6 +81,18 @@ pub enum TemplateCommands {
         /// Maximum StarForge CLI version supported (semver, e.g. "1.99.99")
         #[arg(long)]
         cli_version_max: Option<String>,
+        /// SPDX license identifier (e.g. "MIT", "Apache-2.0")
+        #[arg(long)]
+        license: Option<String>,
+        /// Source repository URL
+        #[arg(long)]
+        repository: Option<String>,
+        /// Project homepage URL
+        #[arg(long)]
+        homepage: Option<String>,
+        /// Extended documentation URL
+        #[arg(long)]
+        documentation: Option<String>,
     },
     /// Remove a template from the local marketplace
     Remove {
@@ -95,6 +133,25 @@ pub enum TemplateCommands {
 
 pub fn handle(cmd: TemplateCommands) -> Result<()> {
     match cmd {
+        TemplateCommands::Install {
+            path,
+            name,
+            description,
+            author,
+            tags,
+            version,
+            cli_version_min,
+            cli_version_max,
+        } => install(
+            path,
+            name,
+            description,
+            author,
+            tags,
+            version,
+            cli_version_min,
+            cli_version_max,
+        ),
         TemplateCommands::Publish {
             path,
             name,
@@ -104,6 +161,10 @@ pub fn handle(cmd: TemplateCommands) -> Result<()> {
             version,
             cli_version_min,
             cli_version_max,
+            license,
+            repository,
+            homepage,
+            documentation,
         } => publish(
             path,
             name,
@@ -113,6 +174,10 @@ pub fn handle(cmd: TemplateCommands) -> Result<()> {
             version,
             cli_version_min,
             cli_version_max,
+            license,
+            repository,
+            homepage,
+            documentation,
         ),
         TemplateCommands::List => list(),
         TemplateCommands::Search {
@@ -136,6 +201,31 @@ pub fn handle(cmd: TemplateCommands) -> Result<()> {
     }
 }
 
+fn install(
+    path: PathBuf,
+    name: Option<String>,
+    description: Option<String>,
+    author: Option<String>,
+    tags: Option<String>,
+    version: String,
+    cli_version_min: Option<String>,
+    cli_version_max: Option<String>,
+) -> Result<()> {
+    publish(
+        path,
+        name,
+        description,
+        author,
+        tags,
+        version,
+        cli_version_min,
+        cli_version_max,
+    )?;
+    p::header("Template Install");
+    p::info("Template package installed into the local registry.");
+    Ok(())
+}
+
 fn publish(
     path: PathBuf,
     name: Option<String>,
@@ -145,6 +235,10 @@ fn publish(
     version: String,
     cli_version_min: Option<String>,
     cli_version_max: Option<String>,
+    license: Option<String>,
+    repository: Option<String>,
+    homepage: Option<String>,
+    documentation: Option<String>,
 ) -> Result<()> {
     use dialoguer::{theme::ColorfulTheme, Input};
     let name = match name {
@@ -181,6 +275,10 @@ fn publish(
         version,
         cli_version_min,
         cli_version_max,
+        license,
+        repository,
+        homepage,
+        documentation,
     )?;
     let template = templates::get_template(&name)?;
 
@@ -191,6 +289,12 @@ fn publish(
     p::kv("Source", &template.source.to_string());
     if !template.tags.is_empty() {
         p::kv("Tags", &template.tags.join(", "));
+    }
+    if let Some(lic) = template.license.as_ref() {
+        p::kv("License", lic);
+    }
+    if let Some(repo) = template.repository.as_ref() {
+        p::kv("Repository", repo);
     }
     if let Some(path) = template.path.as_ref() {
         p::kv("Path", path);
@@ -372,6 +476,18 @@ fn show(name: String) -> Result<()> {
     }
     if !template.tags.is_empty() {
         p::kv("Tags", &template.tags.join(", "));
+    }
+    if let Some(ref license) = template.license {
+        p::kv("License", license);
+    }
+    if let Some(ref repo) = template.repository {
+        p::kv("Repository", repo);
+    }
+    if let Some(ref hp) = template.homepage {
+        p::kv("Homepage", hp);
+    }
+    if let Some(ref doc_url) = template.documentation {
+        p::kv("Documentation", doc_url);
     }
     if let Some(ref min) = template.cli_version_min {
         p::kv("Requires StarForge >=", min);
