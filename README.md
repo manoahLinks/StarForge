@@ -427,18 +427,35 @@ All templates include a working test suite and a README with build/deploy instru
 
 ## Contributing
 
+We welcome contributions from developers of all experience levels! Whether you're fixing a bug, adding a feature, or improving documentation, your work helps the Stellar ecosystem.
+
+**New contributor?** Start here: [CONTRIBUTING.md](CONTRIBUTING.md) has everything you need to get set up and submit your first PR.
+
+**Need a quick reference?** Check out [CONTRIBUTOR_QUICK_REFERENCE.md](CONTRIBUTOR_QUICK_REFERENCE.md) for common commands and patterns.
+
+### Key Contribution Resources
+
+| Resource | What it covers |
+|----------|---|
+| [CONTRIBUTING.md](CONTRIBUTING.md) | **Full contributor guide** — setup, building, testing, PR process |
+| [CONTRIBUTOR_QUICK_REFERENCE.md](CONTRIBUTOR_QUICK_REFERENCE.md) | **Quick lookup** — common commands, project structure, troubleshooting |
+| [CI_ENFORCEMENT.md](CI_ENFORCEMENT.md) | **CI pipeline** — formatting, linting, security, and test requirements |
+| [CODE_STYLE_STANDARDS.md](CODE_STYLE_STANDARDS.md) | **Code style** — naming, documentation, linting rules, IDE setup |
+| [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | **Deep dive** — architecture, adding features, release process |
+
+### Quick Start
+
+1. Fork and clone the repository
+2. Follow [CONTRIBUTING.md](CONTRIBUTING.md) to set up Rust and the project
+3. Create a branch: `git checkout -b feat/issue-XXX-description`
+4. Make your changes and run `cargo test`
+5. Push and open a Pull Request with a clear description
+
+### Rewards
+
 This project participates in the **[Stellar Wave Program](https://www.drips.network/wave/stellar)** on Drips. Contributors who resolve issues during an active Wave earn Points that translate to real USDC rewards.
 
 **Read the [Terms & Rules](https://docs.drips.network/wave/terms-and-rules) before contributing.**
-
-### How to contribute
-
-1. Fork the repository
-2. Create a branch: `git checkout -b feat/your-feature`
-3. Make your changes and commit: `git commit -m "feat: description"`
-4. Push and open a Pull Request against `main`
-
-Please keep PRs scoped to a single issue and include a clear description of what changed and why.
 
 ---
 ## License
