@@ -221,6 +221,10 @@ pub struct WalletRotationRecord {
     pub previous_public_key: String,
     pub previous_network: String,
     pub previous_funded: bool,
+    /// The previous secret key (plaintext or encrypted bundle), preserved when
+    /// `--backup` is passed to `wallet rotate`.  `None` when not requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_secret_key: Option<String>,
 }
 
 impl Default for Config {
