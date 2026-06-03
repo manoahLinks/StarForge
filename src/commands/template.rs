@@ -98,6 +98,10 @@ pub enum TemplateCommands {
     Remove {
         /// Template name
         name: String,
+
+        /// Also delete cached files and downloaded assets
+        #[arg(long)]
+        purge: bool,
     },
     /// Initialize the template registry with example templates
     Init,
@@ -198,6 +202,8 @@ pub fn handle(cmd: TemplateCommands) -> Result<()> {
             force,
         } => install(source, name, version, force),
         TemplateCommands::Update { name, all } => update(name, all),
+        // In the match arm
+TemplateCommands::Remove { name, purge } => remove(name, purge),
     }
 }
 
@@ -539,9 +545,14 @@ fn print_quality_signals(template: &templates::TemplateEntry) {
     }
 }
 
-fn remove(name: String) -> Result<()> {
-    templates::remove_template(&name)?;
-    p::success(&format!("Template '{}' removed", name));
+fn remove(name: String, purge: bool) -> Result<()> {
+    templates::remove_template(&name, purge)?;
+    
+    if purge {
+        p::success(&format!("Template '{}' and all local assets removed", name));
+    } else {
+        p::success(&format!("Template '{}' removed from registry (use --purge to also delete cached files)", name));
+    }
     Ok(())
 }
 

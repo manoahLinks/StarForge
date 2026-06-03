@@ -500,3 +500,9 @@ StarForge has comprehensive documentation covering all aspects of the project:
 
 For a complete overview, see [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md).
 
+
+# Remove a template
+starforge template remove my-template
+
+# Remove template + delete all local files
+starforge template remove my-template --purge

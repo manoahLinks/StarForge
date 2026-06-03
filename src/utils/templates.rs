@@ -795,9 +795,12 @@ pub fn add_template(entry: TemplateEntry) -> Result<()> {
     Ok(())
 }
 
-pub fn remove_template(name: &str) -> Result<()> {
+/// Remove a template from the registry.
+/// If `purge` is true, also deletes any cached/downloaded assets.
+pub fn remove_template(name: &str, purge: bool) -> Result<()> {
     let mut registry = load_registry()?;
     let before = registry.templates.len();
+    
     registry.templates.retain(|t| t.name != name);
 
     if registry.templates.len() == before {
@@ -805,6 +808,35 @@ pub fn remove_template(name: &str) -> Result<()> {
     }
 
     save_registry(&registry)?;
+
+    // Purge local assets if requested
+    if purge {
+        purge_template_assets(name)?;
+    }
+
+    Ok(())
+} 
+
+/// Delete all local cached and stored assets for a template
+fn purge_template_assets(name: &str) -> Result<()> {
+    // 1. Purge from template storage directory
+    if let Ok(storage_dir) = template_storage_dir() {
+        let template_path = storage_dir.join(name);
+        if template_path.exists() {
+            fs::remove_dir_all(&template_path)
+                .with_context(|| format!("Failed to purge stored template at {}", template_path.display()))?;
+        }
+    }
+
+    // 2. Purge from cache directory
+    if let Ok(cache_dir) = template_cache_dir() {
+        let cache_path = cache_dir.join(name);
+        if cache_path.exists() {
+            fs::remove_dir_all(&cache_path)
+                .with_context(|| format!("Failed to purge cached template at {}", cache_path.display()))?;
+        }
+    }
+
     Ok(())
 }
 
