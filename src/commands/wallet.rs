@@ -1,4 +1,6 @@
-use crate::utils::{config, crypto, hardware_wallet, horizon, mnemonic, multisig, print as p};
+use crate::utils::{
+    config, confirmation, crypto, hardware_wallet, horizon, mnemonic, multisig, print as p,
+};
 use anyhow::{Context, Result};
 use bip39::{Language, Mnemonic};
 use chrono::Utc;
@@ -14,12 +16,27 @@ use stellar_strkey::ed25519::{PrivateKey as StellarPrivateKey, PublicKey as Stel
 
 const WALLET_BACKUP_VERSION: &str = "1";
 
-fn kdf_options(mem: Option<u32>, iterations: Option<u32>) -> Option<crypto::KdfOptions> {
-    if mem.is_none() && iterations.is_none() {
-        None
-    } else {
-        Some(crypto::KdfOptions { mem, iterations })
+fn kdf_options(
+    mem: Option<u32>,
+    iterations: Option<u32>,
+    parallelism: Option<u32>,
+    config_default: Option<&crypto::KdfOptions>,
+) -> Option<crypto::KdfOptions> {
+    if mem.is_none() && iterations.is_none() && parallelism.is_none() && config_default.is_none() {
+        return None;
     }
+
+    let mut options = config_default.cloned().unwrap_or_default();
+    if let Some(m) = mem {
+        options.mem = Some(m);
+    }
+    if let Some(i) = iterations {
+        options.iterations = Some(i);
+    }
+    if let Some(p) = parallelism {
+        options.parallelism = Some(p);
+    }
+    Some(options)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,6 +97,15 @@ pub enum WalletCommands {
         /// Account index for SEP-0005 path m/44'/148'/index' (requires --mnemonic)
         #[arg(long, default_value = "0", requires = "mnemonic")]
         account_index: u32,
+        /// Argon2 memory cost in KiB (requires --encrypt)
+        #[arg(long, requires = "encrypt")]
+        mem: Option<u32>,
+        /// Argon2 iteration count (requires --encrypt)
+        #[arg(long, requires = "encrypt")]
+        iterations: Option<u32>,
+        /// Argon2 parallelism factor (requires --encrypt)
+        #[arg(long, requires = "encrypt")]
+        parallelism: Option<u32>,
     },
     /// List all saved wallets
     List,
@@ -134,12 +160,22 @@ pub enum WalletCommands {
         /// Encrypt the replacement secret key with a passphrase at rest
         #[arg(long, default_value = "false")]
         encrypt: bool,
+        /// Reject passphrases that score below "Strong" or reuse wallet details
+        /// (requires --encrypt)
+        #[arg(long, default_value = "false", requires = "encrypt")]
+        strict: bool,
         /// Argon2 memory cost in KiB (requires --encrypt)
         #[arg(long, requires = "encrypt")]
         mem: Option<u32>,
         /// Argon2 iteration count (requires --encrypt)
         #[arg(long, requires = "encrypt")]
         iterations: Option<u32>,
+        /// Argon2 parallelism factor (requires --encrypt)
+        #[arg(long, requires = "encrypt")]
+        parallelism: Option<u32>,
+        /// Optional backup file path to save a snapshot before rotation
+        #[arg(long)]
+        backup: Option<PathBuf>,
     },
     /// Export a wallet to a JSON backup file
     Export {
@@ -152,10 +188,13 @@ pub enum WalletCommands {
         /// Output file path for the backup JSON
         #[arg(long)]
         output: PathBuf,
+        /// Reject passphrases that score below "Strong" or reuse wallet details
+        #[arg(long, default_value = "false")]
+        strict: bool,
     },
-    /// Import a wallet from a JSON backup or BIP39 recovery phrase
+    /// Import a wallet from a JSON backup, BIP39 recovery phrase, or raw Stellar secret key
     Import {
-        /// Wallet name (required with --mnemonic)
+        /// Wallet name (required with --mnemonic or --key)
         name: Option<String>,
         /// Path to backup JSON file
         #[arg(long, group = "source")]
@@ -163,6 +202,9 @@ pub enum WalletCommands {
         /// Import from a BIP39 recovery phrase (prompted interactively)
         #[arg(long, group = "source")]
         mnemonic: bool,
+        /// Import from a raw Stellar secret key (starts with 'S', 56 characters)
+        #[arg(long, group = "source")]
+        key: Option<String>,
         /// Account index for SEP-0005 path m/44'/148'/index'
         #[arg(long, default_value = "0")]
         account_index: u32,
@@ -172,6 +214,10 @@ pub enum WalletCommands {
         /// Encrypt the imported secret key with a passphrase at rest
         #[arg(long, default_value = "false")]
         encrypt: bool,
+        /// Reject passphrases that score below "Strong" or reuse wallet details
+        /// (requires --encrypt)
+        #[arg(long, default_value = "false", requires = "encrypt")]
+        strict: bool,
     },
 
     /// Connect to a hardware wallet (Ledger/Trezor) and show device info
@@ -280,6 +326,9 @@ pub fn handle(cmd: WalletCommands) -> Result<()> {
             mnemonic: use_mnemonic,
             words,
             account_index,
+            mem,
+            iterations,
+            parallelism,
         } => create(
             name,
             fund,
@@ -289,6 +338,9 @@ pub fn handle(cmd: WalletCommands) -> Result<()> {
             use_mnemonic,
             words,
             account_index,
+            mem,
+            iterations,
+            parallelism,
         ),
         WalletCommands::List => list(),
         WalletCommands::Show { name, reveal } => show(name, reveal),
@@ -307,18 +359,37 @@ pub fn handle(cmd: WalletCommands) -> Result<()> {
             fund,
             network,
             encrypt,
+            strict,
             mem,
             iterations,
-        } => rotate_wallet(name, fund, network, encrypt, mem, iterations),
-        WalletCommands::Export { name, all, output } => export_wallet(name, all, output),
+            parallelism,
+            backup,
+        } => rotate_wallet(name, fund, network, encrypt, strict, mem, iterations, parallelism, backup),
+        WalletCommands::Export {
+            name,
+            all,
+            output,
+            strict,
+        } => export_wallet(name, all, output, strict),
         WalletCommands::Import {
             name,
             file,
             mnemonic: from_mnemonic,
+            key,
             account_index,
             network,
             encrypt,
-        } => import_wallet(name, file, from_mnemonic, account_index, network, encrypt),
+            strict,
+        } => import_wallet(
+            name,
+            file,
+            from_mnemonic,
+            key,
+            account_index,
+            network,
+            encrypt,
+            strict,
+        ),
         WalletCommands::Connect { device } => connect_hardware(device),
         WalletCommands::HwAddress { device, path } => hw_address(device, &path),
         WalletCommands::HwStatus { device } => hw_status(device),
@@ -471,6 +542,9 @@ fn create(
     use_mnemonic: bool,
     words: String,
     account_index: u32,
+    mem: Option<u32>,
+    iterations: Option<u32>,
+    parallelism: Option<u32>,
 ) -> Result<()> {
     let mut cfg = config::load()?;
 
@@ -521,8 +595,17 @@ fn create(
             ));
         }
         println!();
-        let pwd = crypto::prompt_passphrase("Set a passphrase to encrypt this wallet", strict)?;
-        crypto::encrypt_secret(&pwd, &secret_key, None)?
+        let context = [name.as_str(), public_key.as_str(), network.as_str()];
+        let pwd = crypto::prompt_passphrase_with_inputs(
+            "Set a passphrase to encrypt this wallet",
+            strict,
+            &context,
+        )?;
+        crypto::encrypt_secret(
+            &pwd,
+            &secret_key,
+            kdf_options(mem, iterations, parallelism, cfg.wallet_encryption.as_ref()).as_ref(),
+        )?
     } else {
         secret_key.clone()
     };
@@ -881,26 +964,45 @@ fn merge_wallet(
         &format!("{:.7} XLM", tx_result.fee as f64 / 10_000_000.0),
     );
 
-    if !skip_confirm {
-        println!();
-        p::warn(&format!(
-            "Account '{}' ({}) will be closed and remaining XLM sent to {}.",
-            wallet.name, wallet.public_key, destination
-        ));
-        print!(
-            "  Type the source wallet name ({}) to confirm merge: ",
-            wallet.name
-        );
-        use std::io::BufRead;
-        let line = std::io::stdin()
-            .lock()
-            .lines()
-            .next()
-            .unwrap_or(Ok(String::new()))?;
-        if line.trim() != wallet.name {
-            p::info("Account merge cancelled.");
-            return Ok(());
-        }
+    // Build operation summary for confirmation
+    let risk_level = if network == "mainnet" {
+        confirmation::RiskLevel::High
+    } else {
+        confirmation::RiskLevel::Medium
+    };
+
+    let summary = confirmation::OperationSummary::new(
+        "Account Merge".to_string(),
+        network.clone(),
+        risk_level,
+    )
+    .add("Source Wallet", &wallet.name)
+    .add("Source Address", &wallet.public_key)
+    .add("Destination", &destination)
+    .add(
+        "XLM to Transfer",
+        &format!("{:.7} XLM (minus fee)", xlm_balance),
+    )
+    .add(
+        "Estimated Fee",
+        &format!("{:.7} XLM", tx_result.fee as f64 / 10_000_000.0),
+    )
+    .add("Remove Local", if remove_local { "Yes" } else { "No" });
+
+    let confirm_config = confirmation::ConfirmationConfig {
+        risk_level,
+        network: network.clone(),
+        skip_confirm,
+        dry_run: false,
+        prompt: Some(format!(
+            "Type '{}' to confirm merge of account {}:",
+            wallet.name, wallet.name
+        )),
+        require_type_confirmation: true, // Always require type confirmation for merge
+    };
+
+    if !confirmation::confirm_operation(&summary, &confirm_config)? {
+        return Ok(());
     }
 
     println!();
@@ -980,8 +1082,11 @@ fn rotate_wallet(
     fund: bool,
     network_override: Option<String>,
     encrypt: bool,
+    strict: bool,
     mem: Option<u32>,
     iterations: Option<u32>,
+    parallelism: Option<u32>,
+    backup: Option<PathBuf>,
 ) -> Result<()> {
     config::validate_wallet_name(&name)?;
     let mut cfg = config::load()?;
@@ -993,31 +1098,75 @@ fn rotate_wallet(
 
     let stored_network = cfg.wallets[wallet_index].network.clone();
     let original_public_key = cfg.wallets[wallet_index].public_key.clone();
+    let original_secret_key = cfg.wallets[wallet_index].secret_key.clone();
     let original_funded = cfg.wallets[wallet_index].funded;
     let network = network_override.unwrap_or(stored_network);
 
-    let steps = if fund { 3 } else { 2 };
+    let preserve_secret = backup.is_some();
+    let steps = if fund { 4 } else { 3 };
     p::header(&format!("Rotating wallet '{}'", name));
     p::kv("Old Public Key", &original_public_key);
     p::kv("Network", &network);
 
-    p::step(1, steps, "Generating replacement keypair...");
+    // ── Step 1: optional pre-rotation backup snapshot ────────────────────────
+    if let Some(ref backup_path) = backup {
+        p::step(1, steps, "Writing pre-rotation backup snapshot...");
+        let snapshot = WalletBackup {
+            version: WALLET_BACKUP_VERSION.to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            wallets: vec![WalletBackupEntry::from(&cfg.wallets[wallet_index])],
+        };
+        let json = serde_json::to_string_pretty(&snapshot)
+            .context("Failed to serialize backup snapshot")?;
+        if let Some(parent) = backup_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("Failed to create {}", parent.display()))?;
+            }
+        }
+        let passphrase =
+            crypto::prompt_passphrase("Set a passphrase to encrypt the backup snapshot", false)?;
+        let encrypted = crypto::encrypt_secret(&passphrase, &json, None)?;
+        fs::write(backup_path, encrypted)
+            .with_context(|| format!("Failed to write backup to {}", backup_path.display()))?;
+        p::success(&format!("Backup written to {}", backup_path.display()));
+        p::info("Keep this file safe — it contains the previous secret key.");
+    } else {
+        p::step(
+            1,
+            steps,
+            "Skipping backup (pass --backup <file> to save a snapshot)...",
+        );
+    }
+
+    p::step(2, steps, "Generating replacement keypair...");
     let (public_key, secret_key) = generate_keypair();
 
     let secret_to_store = if encrypt {
-        let pwd = crypto::prompt_password(
+        let context = [
+            name.as_str(),
+            original_public_key.as_str(),
+            public_key.as_str(),
+            network.as_str(),
+        ];
+        let pwd = crypto::prompt_passphrase_with_inputs(
             "Set a secure passphrase to encrypt the rotated wallet",
-            true,
+            strict,
+            &context,
         )?;
-        crypto::encrypt_secret(&pwd, &secret_key, kdf_options(mem, iterations).as_ref())?
+        crypto::encrypt_secret(
+            &pwd,
+            &secret_key,
+            kdf_options(mem, iterations, parallelism, cfg.wallet_encryption.as_ref()).as_ref(),
+        )?
     } else {
         secret_key.clone()
     };
 
     p::step(
-        2,
+        3,
         steps,
-        "Archiving previous public key in config metadata...",
+        "Archiving previous keypair in rotation history...",
     );
     {
         let wallet = &mut cfg.wallets[wallet_index];
@@ -1026,6 +1175,11 @@ fn rotate_wallet(
             previous_public_key: original_public_key.clone(),
             previous_network: wallet.network.clone(),
             previous_funded: wallet.funded,
+            previous_secret_key: if preserve_secret {
+                original_secret_key
+            } else {
+                None
+            },
         });
         wallet.public_key = public_key.clone();
         wallet.secret_key = Some(secret_to_store);
@@ -1037,7 +1191,7 @@ fn rotate_wallet(
         if network == "mainnet" {
             p::warn("Friendbot is not available on Mainnet. Skipping fund step.");
         } else {
-            p::step(3, steps, "Funding the replacement wallet via Friendbot...");
+            p::step(4, steps, "Funding the replacement wallet via Friendbot...");
             match horizon::fund_account(&public_key, &network) {
                 Ok(_) => {
                     if let Some(wallet) = cfg.wallets.iter_mut().find(|wallet| wallet.name == name)
@@ -1062,10 +1216,91 @@ fn rotate_wallet(
     if original_funded {
         p::info("The previous key remains an on-chain account; rotation only updates the local wallet mapping.");
     }
+    if preserve_secret {
+        p::info("Previous secret key preserved in rotation history. View with: starforge wallet history <name> --reveal");
+    }
     Ok(())
 }
 
-fn export_wallet(name_opt: Option<String>, all: bool, output: PathBuf) -> Result<()> {
+fn wallet_history(name: String, reveal: bool) -> Result<()> {
+    config::validate_wallet_name(&name)?;
+    let cfg = config::load()?;
+    let wallet = cfg
+        .wallets
+        .iter()
+        .find(|w| w.name == name)
+        .ok_or_else(|| anyhow::anyhow!("Wallet '{}' not found", name))?;
+
+    p::header(&format!("Rotation history for '{}'", name));
+    p::kv_accent("Current Public Key", &wallet.public_key);
+    p::kv("Network", &wallet.network);
+    p::kv("Funded", if wallet.funded { "yes" } else { "no" });
+
+    if wallet.rotation_history.is_empty() {
+        println!();
+        p::info("No rotations recorded. This wallet has never been rotated.");
+        return Ok(());
+    }
+
+    p::kv(
+        "Total rotations",
+        &wallet.rotation_history.len().to_string(),
+    );
+    p::separator();
+
+    for (i, record) in wallet.rotation_history.iter().enumerate().rev() {
+        println!("  Rotation #{}", i + 1);
+        p::kv("  Rotated At", &record.rotated_at);
+        p::kv("  Previous Public Key", &record.previous_public_key);
+        p::kv("  Previous Network", &record.previous_network);
+        p::kv(
+            "  Was Funded",
+            if record.previous_funded { "yes" } else { "no" },
+        );
+
+        match &record.previous_secret_key {
+            Some(sk) if reveal => {
+                if sk.contains(':') {
+                    // Encrypted bundle — prompt for passphrase
+                    let pwd = crypto::prompt_password(
+                        &format!(
+                            "Enter passphrase to decrypt previous key for rotation #{}",
+                            i + 1
+                        ),
+                        false,
+                    )?;
+                    match crypto::decrypt_secret(&pwd, sk) {
+                        Ok(plain) => p::kv("  Previous Secret Key", &plain),
+                        Err(_) => {
+                            p::warn("  Could not decrypt previous secret key (wrong passphrase?)")
+                        }
+                    }
+                } else {
+                    p::kv("  Previous Secret Key", sk);
+                }
+            }
+            Some(_) => {
+                p::kv("  Previous Secret Key", "(stored — use --reveal to show)");
+            }
+            None => {
+                p::kv(
+                    "  Previous Secret Key",
+                    "(not preserved — use --backup on next rotation)",
+                );
+            }
+        }
+
+        if i > 0 {
+            println!();
+        }
+    }
+
+    p::separator();
+    p::info("To export a full backup: starforge wallet export --name <name> --output backup.json");
+    Ok(())
+}
+
+fn export_wallet(name_opt: Option<String>, all: bool, output: PathBuf, strict: bool) -> Result<()> {
     let cfg = config::load()?;
     let wallets_to_export: Vec<WalletBackupEntry> = if all {
         cfg.wallets
@@ -1101,9 +1336,25 @@ fn export_wallet(name_opt: Option<String>, all: bool, output: PathBuf) -> Result
         wallets: wallets_to_export,
     };
 
+    let context: Vec<&str> = backup
+        .wallets
+        .iter()
+        .flat_map(|wallet| {
+            [
+                wallet.name.as_str(),
+                wallet.public_key.as_str(),
+                wallet.network.as_str(),
+            ]
+        })
+        .collect();
+
     let json = serde_json::to_string_pretty(&backup)
         .with_context(|| "Failed to serialize wallet backup")?;
-    let passphrase = crypto::prompt_passphrase("Enter passphrase to encrypt backup", false)?;
+    let passphrase = crypto::prompt_passphrase_with_inputs(
+        "Enter passphrase to encrypt backup",
+        strict,
+        &context,
+    )?;
     let encrypted = crypto::encrypt_secret(&passphrase, &json, None)?;
     fs::write(&output, encrypted)
         .with_context(|| format!("Failed to write {}", output.display()))?;
@@ -1123,19 +1374,32 @@ fn import_wallet(
     name: Option<String>,
     file: Option<PathBuf>,
     from_mnemonic: bool,
+    key: Option<String>,
     account_index: u32,
     network_override: Option<String>,
     encrypt: bool,
+    strict: bool,
 ) -> Result<()> {
     if from_mnemonic {
         let name = name.ok_or_else(|| {
             anyhow::anyhow!("Wallet name is required for mnemonic import (e.g. starforge wallet import alice --mnemonic)")
         })?;
-        return import_from_mnemonic(name, account_index, network_override, encrypt);
+        return import_from_mnemonic(name, account_index, network_override, encrypt, strict);
+    }
+
+    if let Some(secret_key) = key {
+        let name = name.ok_or_else(|| {
+            anyhow::anyhow!(
+                "Wallet name is required when using --key (e.g. starforge wallet import alice --key SXXX...)"
+            )
+        })?;
+        return import_from_secret_key(name, secret_key, network_override, encrypt);
     }
 
     let file = file.ok_or_else(|| {
-        anyhow::anyhow!("Provide --file <backup.json> or --mnemonic to import a wallet")
+        anyhow::anyhow!(
+            "Provide --file <backup.json>, --mnemonic, or --key <SXXX...> to import a wallet"
+        )
     })?;
     import_wallets(file)
 }
@@ -1145,6 +1409,7 @@ fn import_from_mnemonic(
     account_index: u32,
     network_override: Option<String>,
     encrypt: bool,
+    strict: bool,
 ) -> Result<()> {
     let mut cfg = config::load()?;
     config::validate_wallet_name(&name)?;
@@ -1164,7 +1429,12 @@ fn import_from_mnemonic(
 
     let secret_to_store = if encrypt {
         println!();
-        let pwd = crypto::prompt_passphrase("Set a passphrase to encrypt this wallet", false)?;
+        let context = [name.as_str(), public_key.as_str(), network.as_str()];
+        let pwd = crypto::prompt_passphrase_with_inputs(
+            "Set a passphrase to encrypt this wallet",
+            strict,
+            &context,
+        )?;
         crypto::encrypt_secret(&pwd, &secret_key, None)?
     } else {
         secret_key
@@ -1189,13 +1459,71 @@ fn import_from_mnemonic(
     Ok(())
 }
 
+fn import_from_secret_key(
+    name: String,
+    secret_key: String,
+    network_override: Option<String>,
+    encrypt: bool,
+) -> Result<()> {
+    if secret_key.contains(':') {
+        anyhow::bail!(
+            "--key expects a raw Stellar secret key (starts with 'S', 56 characters), \
+             not an encrypted bundle. Use --file to import an encrypted backup."
+        );
+    }
+    config::validate_secret_key(&secret_key)?;
+
+    let mut cfg = config::load()?;
+    config::validate_wallet_name(&name)?;
+
+    if cfg.wallets.iter().any(|w| w.name == name) {
+        anyhow::bail!("A wallet named '{}' already exists.", name);
+    }
+
+    let decoded_secret = StellarPrivateKey::from_string(&secret_key)
+        .map_err(|_| anyhow::anyhow!("Invalid Stellar secret key format"))?;
+    let signing_key = SigningKey::from_bytes(&decoded_secret.0);
+    let public_key = StellarPublicKey(signing_key.verifying_key().to_bytes()).to_string();
+
+    let network = network_override.unwrap_or_else(|| cfg.network.clone());
+
+    p::header(&format!("Importing wallet '{}' from secret key", name));
+    p::kv_accent("Public Key", &public_key);
+
+    let secret_to_store = if encrypt {
+        println!();
+        let pwd = crypto::prompt_passphrase("Set a passphrase to encrypt this wallet", false)?;
+        crypto::encrypt_secret(&pwd, &secret_key, None)?
+    } else {
+        secret_key
+    };
+
+    cfg.wallets.push(config::WalletEntry {
+        name: name.clone(),
+        public_key,
+        secret_key: Some(secret_to_store),
+        network,
+        created_at: Utc::now().to_rfc3339(),
+        funded: false,
+        rotation_history: Vec::new(),
+    });
+
+    config::save(&cfg)?;
+    p::success(&format!("Wallet '{}' imported from secret key", name));
+    p::info(&format!(
+        "View it with: {}",
+        format!("starforge wallet show {}", name).cyan()
+    ));
+    Ok(())
+}
+
 fn import_wallets(file: PathBuf) -> Result<()> {
     config::validate_file_path(&file, Some("json"))?;
     let raw_contents =
         fs::read_to_string(&file).with_context(|| format!("Failed to read {}", file.display()))?;
     // Detect encrypted format (salt:nonce:ciphertext)
     let contents = if raw_contents.matches(':').count() == 2 {
-        let passphrase = crypto::prompt_passphrase("Enter passphrase to decrypt backup", false)?;
+        let passphrase = crypto::prompt_password("Enter passphrase to decrypt backup", false)?;
         crypto::decrypt_secret(&passphrase, &raw_contents)?
     } else {
         raw_contents
@@ -1262,6 +1590,7 @@ fn import_wallets(file: PathBuf) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::generate_keypair;
+    use crate::utils::config::{WalletEntry, WalletRotationRecord};
     use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
     use std::collections::HashSet;
     use stellar_strkey::ed25519::{PrivateKey as StellarPrivateKey, PublicKey as StellarPublicKey};
@@ -1294,6 +1623,95 @@ mod tests {
             let signature = signing_key.sign(message);
             verifying_key.verify(message, &signature).unwrap();
         }
+    }
+
+    // ── Rotation history / backup tests ─────────────────────────────────────
+
+    fn make_wallet(name: &str, public_key: &str) -> WalletEntry {
+        WalletEntry {
+            name: name.to_string(),
+            public_key: public_key.to_string(),
+            secret_key: Some(
+                "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            ),
+            network: "testnet".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            funded: true,
+            rotation_history: vec![],
+        }
+    }
+
+    #[test]
+    fn rotation_record_without_backup_has_no_secret() {
+        let record = WalletRotationRecord {
+            rotated_at: "2025-06-01T00:00:00Z".to_string(),
+            previous_public_key: "GABC".to_string(),
+            previous_network: "testnet".to_string(),
+            previous_funded: true,
+            previous_secret_key: None,
+        };
+        assert!(record.previous_secret_key.is_none());
+    }
+
+    #[test]
+    fn rotation_record_with_backup_preserves_secret() {
+        let secret = "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let record = WalletRotationRecord {
+            rotated_at: "2025-06-01T00:00:00Z".to_string(),
+            previous_public_key: "GABC".to_string(),
+            previous_network: "testnet".to_string(),
+            previous_funded: true,
+            previous_secret_key: Some(secret.to_string()),
+        };
+        assert_eq!(record.previous_secret_key.as_deref(), Some(secret));
+    }
+
+    #[test]
+    fn rotation_history_accumulates_across_multiple_rotations() {
+        let mut wallet = make_wallet("alice", "GABC");
+
+        // Simulate two rotations
+        for i in 0..2 {
+            wallet.rotation_history.push(WalletRotationRecord {
+                rotated_at: format!("2025-0{}-01T00:00:00Z", i + 1),
+                previous_public_key: format!("GPREV{}", i),
+                previous_network: "testnet".to_string(),
+                previous_funded: false,
+                previous_secret_key: Some(format!("SPREV{}", i)),
+            });
+        }
+
+        assert_eq!(wallet.rotation_history.len(), 2);
+        assert_eq!(wallet.rotation_history[0].previous_public_key, "GPREV0");
+        assert_eq!(wallet.rotation_history[1].previous_public_key, "GPREV1");
+    }
+
+    #[test]
+    fn rotation_record_serialises_without_secret_when_none() {
+        let record = WalletRotationRecord {
+            rotated_at: "2025-06-01T00:00:00Z".to_string(),
+            previous_public_key: "GABC".to_string(),
+            previous_network: "testnet".to_string(),
+            previous_funded: false,
+            previous_secret_key: None,
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        // previous_secret_key should be omitted entirely (skip_serializing_if)
+        assert!(!json.contains("previous_secret_key"));
+    }
+
+    #[test]
+    fn rotation_record_serialises_with_secret_when_present() {
+        let record = WalletRotationRecord {
+            rotated_at: "2025-06-01T00:00:00Z".to_string(),
+            previous_public_key: "GABC".to_string(),
+            previous_network: "testnet".to_string(),
+            previous_funded: false,
+            previous_secret_key: Some("SKEY".to_string()),
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(json.contains("previous_secret_key"));
+        assert!(json.contains("SKEY"));
     }
 }
 

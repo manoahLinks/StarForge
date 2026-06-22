@@ -108,16 +108,14 @@ pub struct TemplateEntry {
     /// Declared maintenance state of the template.
     #[serde(default)]
     pub maintenance: MaintenanceStatus,
-    /// SPDX license identifier or license name (e.g. "MIT", "Apache-2.0").
+    /// SPDX license identifier (e.g. "MIT", "Apache-2.0"). `None` if not declared.
     #[serde(default)]
     pub license: Option<String>,
-    /// Source repository URL (e.g. "https://github.com/org/repo").
+    /// URL of the template's source repository (e.g. GitHub link).
     #[serde(default)]
     pub repository: Option<String>,
-    /// Project homepage URL.
     #[serde(default)]
     pub homepage: Option<String>,
-    /// Link to extended documentation (separate from the README).
     #[serde(default)]
     pub documentation: Option<String>,
 }
@@ -290,26 +288,29 @@ impl TemplateEntry {
         score.clamp(0, 100) as u8
     }
 
-    /// Human-readable trust/quality badges suitable for display to users.
+    /// Compact trust/quality badge strings for inline display in list/search output.
+    ///
+    /// Returns short tokens like `[VERIFIED]`, `[DOCS]`, `[ACTIVE]`, `[DEPRECATED]`,
+    /// `[POPULAR]` that can be joined and appended to a single summary line.
     pub fn trust_indicators(&self) -> Vec<String> {
         let mut badges = Vec::new();
 
         if self.verified {
-            badges.push("✓ Verified".to_string());
+            badges.push("[VERIFIED]".to_string());
         }
         if self.documented {
-            badges.push("📖 Documented".to_string());
+            badges.push("[DOCS]".to_string());
         }
 
         match self.maintenance {
-            MaintenanceStatus::Active => badges.push("🟢 Actively maintained".to_string()),
-            MaintenanceStatus::Maintained => badges.push("🟡 Maintained".to_string()),
-            MaintenanceStatus::Deprecated => badges.push("⚠ Deprecated".to_string()),
+            MaintenanceStatus::Active => badges.push("[ACTIVE]".to_string()),
+            MaintenanceStatus::Maintained => badges.push("[MAINTAINED]".to_string()),
+            MaintenanceStatus::Deprecated => badges.push("[DEPRECATED]".to_string()),
             MaintenanceStatus::Unknown => {}
         }
 
         if self.downloads >= 1000 {
-            badges.push(format!("★ Popular ({} downloads)", self.downloads));
+            badges.push("[POPULAR]".to_string());
         }
 
         badges
@@ -462,17 +463,55 @@ pub fn fetch_template_cached(entry: &TemplateEntry, force_refresh: bool) -> Resu
     let dest = cache_root.join(&entry.name);
 
     if dest.exists() {
-        if force_refresh {
-            fs::remove_dir_all(&dest).with_context(|| {
-                format!("Failed to remove cached template at {}", dest.display())
-            })?;
+        let mut should_refresh = force_refresh;
+        if !should_refresh {
+            if let Ok(metadata) = fs::metadata(&dest) {
+                if let Ok(modified) = metadata.modified() {
+                    use std::time::{Duration, SystemTime};
+                    let ttl = Duration::from_secs(24 * 60 * 60); // 24 hours TTL
+                    if SystemTime::now()
+                        .duration_since(modified)
+                        .unwrap_or_else(|_| ttl)
+                        >= ttl
+                    {
+                        should_refresh = true;
+                    }
+                }
+            }
+        }
+
+        if should_refresh {
+            // Rename existing cache to a temporary name to preserve it in case refresh fails
+            let temp_old = cache_root.join(format!("{}.old", entry.name));
+            // Remove any existing temp_old directory
+            if temp_old.exists() {
+                fs::remove_dir_all(&temp_old)?;
+            }
+            fs::rename(&dest, &temp_old)?;
+            
+            // Try to fetch new template
+            match fetch_template(entry, &dest) {
+                Ok(_) => {
+                    // Success - clean up the old temp directory
+                    fs::remove_dir_all(&temp_old).ok(); // Ignore errors during cleanup
+                    Ok(dest)
+                }
+                Err(_) => {
+                    // Failed - restore old cache and use it
+                    if dest.exists() {
+                        fs::remove_dir_all(&dest)?;
+                    }
+                    fs::rename(&temp_old, &dest)?;
+                    Ok(dest)
+                }
+            }
         } else {
             return Ok(dest);
         }
+    } else {
+        fetch_template(entry, &dest)?;
+        Ok(dest)
     }
-
-    fetch_template(entry, &dest)?;
-    Ok(dest)
 }
 
 /// Return the `src/lib.rs` content for a marketplace template, fetching and
@@ -794,9 +833,12 @@ pub fn add_template(entry: TemplateEntry) -> Result<()> {
     Ok(())
 }
 
-pub fn remove_template(name: &str) -> Result<()> {
+/// Remove a template from the registry.
+/// If `purge` is true, also deletes any cached/downloaded assets.
+pub fn remove_template(name: &str, purge: bool) -> Result<()> {
     let mut registry = load_registry()?;
     let before = registry.templates.len();
+    
     registry.templates.retain(|t| t.name != name);
 
     if registry.templates.len() == before {
@@ -804,6 +846,35 @@ pub fn remove_template(name: &str) -> Result<()> {
     }
 
     save_registry(&registry)?;
+
+    // Purge local assets if requested
+    if purge {
+        purge_template_assets(name)?;
+    }
+
+    Ok(())
+} 
+
+/// Delete all local cached and stored assets for a template
+fn purge_template_assets(name: &str) -> Result<()> {
+    // 1. Purge from template storage directory
+    if let Ok(storage_dir) = template_storage_dir() {
+        let template_path = storage_dir.join(name);
+        if template_path.exists() {
+            fs::remove_dir_all(&template_path)
+                .with_context(|| format!("Failed to purge stored template at {}", template_path.display()))?;
+        }
+    }
+
+    // 2. Purge from cache directory
+    if let Ok(cache_dir) = template_cache_dir() {
+        let cache_path = cache_dir.join(name);
+        if cache_path.exists() {
+            fs::remove_dir_all(&cache_path)
+                .with_context(|| format!("Failed to purge cached template at {}", cache_path.display()))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -1179,6 +1250,257 @@ pub fn validate_template_structure_with_constraints(
     Ok(())
 }
 
+/// Determine how to fetch a template from a user-supplied source string,
+/// then register it in the local registry and return the new entry.
+///
+/// Source resolution order:
+/// 1. Starts with `https://`, `http://`, `git://`, or ends with `.git` → git URL
+/// 2. Path exists on disk, or starts with `/`, `./`, or `../` → local path
+/// 3. Anything else → treated as a registry template name (marketplace lookup)
+pub fn install_template(
+    source: &str,
+    name_override: Option<&str>,
+    version: Option<&str>,
+    force: bool,
+) -> Result<TemplateEntry> {
+    if source.starts_with("https://")
+        || source.starts_with("http://")
+        || source.starts_with("git://")
+        || source.ends_with(".git")
+    {
+        return install_from_git_url(source, name_override, force);
+    }
+
+    let path = Path::new(source);
+    if path.exists()
+        || source.starts_with('/')
+        || source.starts_with("./")
+        || source.starts_with("../")
+    {
+        return install_from_local_path(path, name_override, force);
+    }
+
+    install_from_registry(source, version, force)
+}
+
+fn install_from_git_url(
+    url: &str,
+    name_override: Option<&str>,
+    force: bool,
+) -> Result<TemplateEntry> {
+    let name = name_override.map(str::to_string).unwrap_or_else(|| {
+        url.trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or("template")
+            .trim_end_matches(".git")
+            .to_string()
+    });
+
+    let mut registry = load_registry()?;
+    if registry.templates.iter().any(|t| t.name == name) && !force {
+        anyhow::bail!(
+            "Template '{}' is already installed. Use --force to overwrite.",
+            name
+        );
+    }
+
+    let dest = template_storage_dir()?.join(&name);
+    if dest.exists() {
+        fs::remove_dir_all(&dest).with_context(|| {
+            format!(
+                "Failed to remove existing template directory {}",
+                dest.display()
+            )
+        })?;
+    }
+
+    fetch_git_template(url, None, &dest)?;
+
+    let entry = TemplateEntry {
+        name: name.clone(),
+        description: String::new(),
+        version: "1.0.0".to_string(),
+        source: TemplateSource::Git {
+            url: url.to_string(),
+            branch: None,
+        },
+        tags: vec![],
+        path: Some(dest.to_string_lossy().to_string()),
+        author: String::new(),
+        downloads: 0,
+        verified: false,
+        created_at: String::new(),
+        updated_at: String::new(),
+        cli_version_min: None,
+        cli_version_max: None,
+        documented: dest.join("README.md").exists(),
+        maintenance: MaintenanceStatus::Unknown,
+        license: None,
+        repository: Some(url.to_string()),
+        homepage: None,
+        documentation: None,
+    };
+
+    registry.templates.retain(|t| t.name != name);
+    registry.templates.push(entry.clone());
+    save_registry(&registry)?;
+
+    Ok(entry)
+}
+
+fn install_from_local_path(
+    path: &Path,
+    name_override: Option<&str>,
+    force: bool,
+) -> Result<TemplateEntry> {
+    if !path.exists() {
+        anyhow::bail!("Local path does not exist: {}", path.display());
+    }
+
+    let name = name_override.map(str::to_string).unwrap_or_else(|| {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("template")
+            .to_string()
+    });
+
+    let mut registry = load_registry()?;
+    if registry.templates.iter().any(|t| t.name == name) && !force {
+        anyhow::bail!(
+            "Template '{}' is already installed. Use --force to overwrite.",
+            name
+        );
+    }
+
+    let dest = template_storage_dir()?.join(&name);
+    if dest.exists() {
+        fs::remove_dir_all(&dest).with_context(|| {
+            format!(
+                "Failed to remove existing template directory {}",
+                dest.display()
+            )
+        })?;
+    }
+
+    fetch_local_template(path, &dest)?;
+
+    let entry = TemplateEntry {
+        name: name.clone(),
+        description: String::new(),
+        version: "1.0.0".to_string(),
+        source: TemplateSource::Local {
+            path: dest.to_string_lossy().to_string(),
+        },
+        tags: vec![],
+        path: Some(dest.to_string_lossy().to_string()),
+        author: String::new(),
+        downloads: 0,
+        verified: false,
+        created_at: String::new(),
+        updated_at: String::new(),
+        cli_version_min: None,
+        cli_version_max: None,
+        documented: dest.join("README.md").exists(),
+        maintenance: MaintenanceStatus::Unknown,
+        license: None,
+        repository: None,
+        homepage: None,
+        documentation: None,
+    };
+
+    registry.templates.retain(|t| t.name != name);
+    registry.templates.push(entry.clone());
+    save_registry(&registry)?;
+
+    Ok(entry)
+}
+
+fn install_from_registry(name: &str, version: Option<&str>, force: bool) -> Result<TemplateEntry> {
+    let entry = get_template_by_name_and_version(name, version)?;
+    assert_template_compatible(&entry)?;
+
+    let dest = template_storage_dir()?.join(&entry.name);
+    if dest.exists() {
+        if !force {
+            anyhow::bail!(
+                "Template '{}' is already cached locally. Use --force to re-download.",
+                entry.name
+            );
+        }
+        fs::remove_dir_all(&dest)
+            .with_context(|| format!("Failed to remove cached template at {}", dest.display()))?;
+    }
+
+    match &entry.source {
+        TemplateSource::Git { url, branch } => fetch_git_template(url, branch.as_deref(), &dest)?,
+        TemplateSource::Local { path: src_path } => {
+            fetch_local_template(Path::new(src_path), &dest)?
+        }
+        TemplateSource::Builtin { id } => fetch_builtin_template(id, &dest)?,
+    }
+
+    Ok(entry)
+}
+
+/// Re-fetch a git-sourced template into its local storage directory, updating
+/// it in place. Only git-sourced templates support this operation.
+pub fn update_installed_template(name: &str) -> Result<()> {
+    let entry = get_template(name)?;
+
+    match &entry.source {
+        TemplateSource::Git { url, branch } => {
+            let dest = if let Some(ref p) = entry.path {
+                PathBuf::from(p)
+            } else {
+                template_storage_dir()?.join(name)
+            };
+
+            if dest.exists() {
+                fs::remove_dir_all(&dest).with_context(|| {
+                    format!("Failed to remove existing template at {}", dest.display())
+                })?;
+            }
+
+            fetch_git_template(url, branch.as_deref(), &dest)?;
+
+            let mut registry = load_registry()?;
+            if let Some(t) = registry.templates.iter_mut().find(|t| t.name == name) {
+                t.path = Some(dest.to_string_lossy().to_string());
+                t.updated_at = String::new();
+            }
+            save_registry(&registry)?;
+
+            Ok(())
+        }
+        other => anyhow::bail!(
+            "Template '{}' uses source '{}' which does not support updates. \
+             Only git-sourced templates can be updated.",
+            name,
+            other
+        ),
+    }
+}
+
+/// Update all git-sourced templates. Returns a list of (name, result) pairs.
+pub fn update_all_installed_templates() -> Result<Vec<(String, Result<()>)>> {
+    let registry = load_registry()?;
+    let git_names: Vec<String> = registry
+        .templates
+        .iter()
+        .filter(|t| matches!(t.source, TemplateSource::Git { .. }))
+        .map(|t| t.name.clone())
+        .collect();
+
+    Ok(git_names
+        .into_iter()
+        .map(|name| {
+            let result = update_installed_template(&name);
+            (name, result)
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1433,8 +1755,8 @@ mod tests {
             cli_version_max: None,
             documented: true,
             maintenance: MaintenanceStatus::Active,
-            license: Some("MIT".to_string()),
-            repository: Some("https://github.com/example/uniswap-v2".to_string()),
+            license: None,
+            repository: None,
             homepage: None,
             documentation: None,
         });
@@ -1763,5 +2085,194 @@ mod tests {
             CompatibilityStatus::MalformedMetadata { .. }
         ));
         assert!(assert_template_compatible(&entry).is_err());
+    }
+
+    // ── parse_semver edge cases ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_semver_large_numbers() {
+        assert_eq!(parse_semver("999.0.0"), Ok((999, 0, 0)));
+        assert_eq!(parse_semver("0.0.999999"), Ok((0, 0, 999999)));
+    }
+
+    #[test]
+    fn parse_semver_rejects_single_component() {
+        assert!(parse_semver("1").is_err());
+    }
+
+    #[test]
+    fn parse_semver_rejects_two_components() {
+        assert!(parse_semver("1.2").is_err());
+    }
+
+    #[test]
+    fn parse_semver_rejects_extra_dots() {
+        assert!(
+            parse_semver("1.2.3.4").is_err(),
+            "four components should fail"
+        );
+    }
+
+    #[test]
+    fn parse_semver_rejects_whitespace() {
+        assert!(parse_semver(" 1.2.3").is_err());
+        assert!(parse_semver("1.2.3 ").is_err());
+        assert!(parse_semver("1. 2.3").is_err());
+    }
+
+    #[test]
+    fn parse_semver_rejects_negative_component() {
+        // A leading '-' makes the component non-numeric.
+        assert!(parse_semver("1.-2.3").is_err());
+    }
+
+    #[test]
+    fn parse_semver_rejects_alpha_component() {
+        assert!(parse_semver("1.2.alpha").is_err());
+        assert!(parse_semver("v1.2.3").is_err());
+    }
+
+    // ── check_version_range payload verification ───────────────────────────────
+
+    #[test]
+    fn check_version_range_too_old_carries_correct_payload() {
+        let result = check_version_range("0.0.9", Some("0.1.0"), None);
+        match result {
+            CompatibilityStatus::TooOld {
+                required_min,
+                running,
+            } => {
+                assert_eq!(required_min, "0.1.0");
+                assert_eq!(running, "0.0.9");
+            }
+            other => panic!("expected TooOld, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn check_version_range_too_new_carries_correct_payload() {
+        let result = check_version_range("2.0.0", None, Some("1.99.99"));
+        match result {
+            CompatibilityStatus::TooNew {
+                required_max,
+                running,
+            } => {
+                assert_eq!(required_max, "1.99.99");
+                assert_eq!(running, "2.0.0");
+            }
+            other => panic!("expected TooNew, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn check_version_range_exact_min_boundary_is_compatible() {
+        // version == min should be Compatible, not TooOld.
+        assert_eq!(
+            check_version_range("1.0.0", Some("1.0.0"), None),
+            CompatibilityStatus::Compatible
+        );
+    }
+
+    #[test]
+    fn check_version_range_exact_max_boundary_is_compatible() {
+        // version == max should be Compatible, not TooNew.
+        assert_eq!(
+            check_version_range("1.0.0", None, Some("1.0.0")),
+            CompatibilityStatus::Compatible
+        );
+    }
+
+    #[test]
+    fn check_version_range_min_only_above_min_is_compatible() {
+        assert_eq!(
+            check_version_range("1.2.0", Some("1.0.0"), None),
+            CompatibilityStatus::Compatible
+        );
+    }
+
+    #[test]
+    fn check_version_range_max_only_below_max_is_compatible() {
+        assert_eq!(
+            check_version_range("0.9.0", None, Some("1.0.0")),
+            CompatibilityStatus::Compatible
+        );
+    }
+
+    #[test]
+    fn check_version_range_malformed_running_version_is_error() {
+        // The running version itself being malformed should yield MalformedMetadata.
+        let result = check_version_range("not-a-version", Some("0.1.0"), None);
+        assert!(matches!(
+            result,
+            CompatibilityStatus::MalformedMetadata { .. }
+        ));
+    }
+
+    #[test]
+    fn check_version_range_malformed_max_carries_reason() {
+        let result = check_version_range("0.1.0", None, Some("1.x.0"));
+        match result {
+            CompatibilityStatus::MalformedMetadata { reason } => {
+                assert!(!reason.is_empty(), "reason should not be empty");
+            }
+            other => panic!("expected MalformedMetadata, got {:?}", other),
+        }
+    }
+
+    // ── assert_template_compatible error message content ──────────────────────
+
+    #[test]
+    fn assert_template_compatible_too_old_message_contains_min_and_running() {
+        let mut entry = make_entry("future-tpl");
+        let (major, _, _) = parse_semver(CLI_VERSION).unwrap();
+        let min = format!("{}.0.0", major + 100);
+        entry.cli_version_min = Some(min.clone());
+        let err = assert_template_compatible(&entry).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains(&min), "error should contain required_min");
+        assert!(
+            msg.contains(CLI_VERSION),
+            "error should contain running version"
+        );
+        assert!(
+            msg.contains("future-tpl"),
+            "error should contain template name"
+        );
+    }
+
+    #[test]
+    fn assert_template_compatible_too_new_message_contains_max_and_running() {
+        let mut entry = make_entry("old-tpl");
+        let (major, minor, _) = parse_semver(CLI_VERSION).unwrap();
+        if major > 0 || minor > 0 {
+            entry.cli_version_max = Some("0.0.0".to_string());
+            let err = assert_template_compatible(&entry).unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("0.0.0"), "error should contain required_max");
+            assert!(
+                msg.contains(CLI_VERSION),
+                "error should contain running version"
+            );
+            assert!(
+                msg.contains("old-tpl"),
+                "error should contain template name"
+            );
+        }
+    }
+
+    #[test]
+    fn assert_template_compatible_malformed_message_contains_reason() {
+        let mut entry = make_entry("broken-tpl");
+        entry.cli_version_min = Some("bad-version".to_string());
+        let err = assert_template_compatible(&entry).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("broken-tpl"),
+            "error should contain template name"
+        );
+        assert!(
+            msg.contains("malformed") || msg.contains("bad-version"),
+            "error should describe the problem"
+        );
     }
 }

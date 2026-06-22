@@ -28,20 +28,27 @@ jobs:
           command: check
           arguments: --all-features
 
-  test:
-    name: Build, Test & Clippy
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --locked
+      - name: Test
+        run: cargo test --locked
+
+  clippy:
+    name: Clippy Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Build
-        run: cargo build --locked
-      - name: Test
-        run: cargo test --locked
-      - name: Clippy
-        run: cargo clippy --locked -- -D warnings
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
   smoke:
     name: CLI Smoke Tests

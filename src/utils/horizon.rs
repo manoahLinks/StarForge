@@ -570,7 +570,9 @@ mod tests {
                 version: "1".to_string(),
                 networks,
                 wallets: Vec::new(),
+                plugin_trust: Default::default(),
                 telemetry_enabled: Some(false),
+                wallet_encryption: None,
             })
             .expect("save config");
 
@@ -598,7 +600,7 @@ mod tests {
 
     #[test]
     fn fetch_account_returns_mocked_account() {
-        let mut server = Server::new();
+        let server = Server::new();
         let _guard = TestConfigGuard::new(&server.url(), None);
         let public_key = "GACCOUNT123";
 
@@ -624,7 +626,7 @@ mod tests {
 
     #[test]
     fn fetch_account_reports_parse_error_for_invalid_json() {
-        let mut server = Server::new();
+        let server = Server::new();
         let _guard = TestConfigGuard::new(&server.url(), None);
 
         let _mock = server
@@ -640,7 +642,7 @@ mod tests {
 
     #[test]
     fn fund_account_reports_friendbot_error_path() {
-        let mut server = Server::new();
+        let server = Server::new();
         let _guard = TestConfigGuard::new(&server.url(), Some(server.url()));
 
         let _mock = server
@@ -655,7 +657,7 @@ mod tests {
 
     #[test]
     fn build_transaction_query_url_includes_pagination_params() {
-        let mut server = Server::new();
+        let server = Server::new();
         let _guard = TestConfigGuard::new(&server.url(), None);
 
         let filter = TxFilter {
@@ -676,7 +678,7 @@ mod tests {
 
     #[test]
     fn fetch_transactions_filtered_uses_cursor_and_filters_records() {
-        let mut server = Server::new();
+        let server = Server::new();
         let _guard = TestConfigGuard::new(&server.url(), None);
 
         let _mock = server

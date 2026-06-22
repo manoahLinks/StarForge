@@ -8,7 +8,7 @@
 )]
 
 mod commands;
-pub mod plugins;
+pub use starforge::plugins;
 mod utils;
 
 use clap::{Parser, Subcommand};
@@ -56,6 +56,13 @@ enum Commands {
     Deploy(commands::deploy::DeployArgs),
     /// Show starforge config and environment info
     Info,
+    /// Manage starforge configuration (telemetry, network)
+    #[command(subcommand)]
+    Config(commands::config::ConfigCommands),
+
+    /// Manage telemetry collection
+    #[command(subcommand)]
+    Telemetry(commands::telemetry::TelemetryCommands),
 
     Tx(commands::tx::TxArgs), // fetch transaction for the account
 
@@ -103,6 +110,9 @@ enum Commands {
     /// Static analysis and linting for Soroban contracts
     Lint(commands::lint::LintArgs),
 
+    /// Run connectivity diagnostics for attached Ledger/Trezor devices
+    Diagnostics(commands::diagnostics::DiagnosticsArgs),
+
     /// Execute an installed plugin command (e.g. `starforge defi ...`)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -129,6 +139,8 @@ fn main() {
         Commands::Inspect(_) => "inspect",
         Commands::Deploy(_) => "deploy",
         Commands::Info => "info",
+        Commands::Config(_) => "config",
+        Commands::Telemetry(_) => "telemetry",
         Commands::Tx(_) => "tx",
         Commands::Network(_) => "network",
         Commands::Node(_) => "node",
@@ -143,6 +155,7 @@ fn main() {
         Commands::Template(_) => "template",
         Commands::Upgrade(_) => "upgrade",
         Commands::Lint(_) => "lint",
+        Commands::Diagnostics(_) => "diagnostics",
         Commands::External(_) => "external",
     }
     .to_string();
@@ -155,6 +168,8 @@ fn main() {
         Commands::Inspect(cmd) => commands::inspect::handle(cmd),
         Commands::Deploy(args) => commands::deploy::handle(args),
         Commands::Info => commands::info::handle(),
+        Commands::Config(cmd) => commands::config::handle(cmd),
+        Commands::Telemetry(cmd) => commands::telemetry::handle(cmd),
         Commands::Tx(args) => commands::tx::handle(args),
         Commands::Network(cmd) => commands::network::handle(cmd),
         Commands::Node(cmd) => commands::node::handle(cmd),
@@ -169,6 +184,7 @@ fn main() {
         Commands::Template(args) => commands::template::handle(args),
         Commands::Upgrade(cmd) => commands::upgrade::handle(cmd),
         Commands::Lint(args) => commands::lint::handle(args),
+        Commands::Diagnostics(args) => commands::diagnostics::handle(args),
         Commands::External(args) => handle_external_plugin(args),
     };
     let duration = start.elapsed();
@@ -198,6 +214,7 @@ fn handle_external_plugin(args: Vec<String>) -> anyhow::Result<()> {
     let plugin_name = &args[0];
     let plugin_args = &args[1..];
 
+    let cfg = utils::config::load()?;
     let reg = plugins::registry::load_registry().unwrap_or_default();
     if reg.plugins.is_empty() {
         anyhow::bail!(
@@ -206,12 +223,28 @@ fn handle_external_plugin(args: Vec<String>) -> anyhow::Result<()> {
         );
     }
 
+    // Check if the command matches any registered plugin command before loading .so files.
+    let all_commands = plugins::registry::load_all_registered_commands();
+    let known = all_commands.iter().any(|c| c.name == *plugin_name);
+    if !known {
+        let available: Vec<String> = all_commands
+            .iter()
+            .map(|c| format!("  • {}", c.name))
+            .collect();
+        let hint = if available.is_empty() {
+            "No plugin commands registered. Re-install plugins to discover their commands."
+                .to_string()
+        } else {
+            format!("Available plugin commands:\n{}", available.join("\n"))
+        };
+        anyhow::bail!("Unknown command '{}'.\n\n{}", plugin_name, hint);
+    }
+
     // Warn about unknown-trust plugins before loading.
-    for pl in reg
-        .plugins
-        .iter()
-        .filter(|p| p.trust == TrustLevel::Unknown && !p.source.is_empty())
-    {
+    for pl in reg.plugins.iter().filter(|p| {
+        plugins::registry::classify_source_with_config(&p.source, &cfg) == TrustLevel::Unknown
+            && !p.source.is_empty()
+    }) {
         eprintln!(
             "  ⚠  Warning: plugin '{}' is from an untrusted source: {}",
             pl.name, pl.source
