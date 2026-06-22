@@ -113,7 +113,7 @@ fn install(name: String, path: Option<PathBuf>, source: Option<String>, force: b
     let lib_path = registry::resolve_plugin_library_path(&name, path)?;
     let source_str = source.as_deref().unwrap_or("");
     let config = crate::utils::config::load().unwrap_or_default();
-    let trust = registry::classify_source_with_config(source_str, &config);
+    let trust = registry::classify_source(source_str);
 
     // Warn the user about untrusted sources and require --force to proceed.
     if trust == TrustLevel::Unknown && !source_str.is_empty() && !force {
@@ -224,7 +224,7 @@ fn load() -> Result<()> {
 
     // Warn about any unknown-trust plugins before loading.
     for pl in reg.plugins.iter().filter(|p| {
-        registry::classify_source_with_config(&p.source, &config) == TrustLevel::Unknown
+        registry::classify_source(&p.source) == TrustLevel::Unknown
             && !p.source.is_empty()
     }) {
         p::warn(&format!(
@@ -404,7 +404,7 @@ fn update(name: Option<String>, yes: bool) -> Result<()> {
             continue;
         }
 
-        let trust = registry::classify_source_with_config(&pl.source, &config);
+        let trust = registry::classify_source(&pl.source);
         if trust == TrustLevel::Unknown && !yes {
             p::warn(&format!(
                 "  '{}' source '{}' is not trusted. Use --yes to force update from unknown sources.",
@@ -561,7 +561,7 @@ fn verify(name: Option<String>, deep: bool, runtime_check: bool) -> Result<()> {
     for pl in &to_check {
         let lib_exists = std::path::Path::new(&pl.path).exists();
 
-        let current_trust = registry::classify_source_with_config(&pl.source, &config);
+        let current_trust = registry::classify_source(&pl.source);
         let trust_ok = match current_trust {
             TrustLevel::Local | TrustLevel::Trusted => true,
             TrustLevel::Unknown => false,

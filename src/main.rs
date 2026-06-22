@@ -242,7 +242,7 @@ fn handle_external_plugin(args: Vec<String>) -> anyhow::Result<()> {
 
     // Warn about unknown-trust plugins before loading.
     for pl in reg.plugins.iter().filter(|p| {
-        plugins::registry::classify_source_with_config(&p.source, &cfg) == TrustLevel::Unknown
+        plugins::registry::classify_source(&p.source, &cfg) == TrustLevel::Unknown
             && !p.source.is_empty()
     }) {
         eprintln!(
