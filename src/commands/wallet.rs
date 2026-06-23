@@ -361,7 +361,17 @@ pub fn handle(cmd: WalletCommands) -> Result<()> {
             iterations,
             parallelism,
             backup,
-        } => rotate_wallet(name, fund, network, encrypt, strict, mem, iterations, parallelism, backup),
+        } => rotate_wallet(
+            name,
+            fund,
+            network,
+            encrypt,
+            strict,
+            mem,
+            iterations,
+            parallelism,
+            backup,
+        ),
         WalletCommands::Export {
             name,
             all,

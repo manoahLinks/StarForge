@@ -531,6 +531,61 @@ fn update(name: Option<String>, yes: bool) -> Result<()> {
     Ok(())
 }
 
+fn discover_commands_from_library(path: &str) -> Result<Vec<RegisteredCommand>> {
+    let mut pm = PluginManager::new();
+    unsafe {
+        pm.load_plugin_diagnosed(path)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+    }
+    Ok(pm
+        .list_commands()
+        .into_iter()
+        .map(|c| RegisteredCommand {
+            name: c.name,
+            description: c.description,
+        })
+        .collect())
+}
+
+fn commands(name: Option<String>) -> Result<()> {
+    p::header("Plugin Commands");
+
+    let reg = registry::load_registry().unwrap_or_default();
+    if reg.plugins.is_empty() {
+        p::info("No plugins installed.");
+        return Ok(());
+    }
+
+    let to_show: Vec<_> = match &name {
+        Some(n) => {
+            let found: Vec<_> = reg.plugins.iter().filter(|p| &p.name == n).collect();
+            if found.is_empty() {
+                anyhow::bail!("Plugin '{}' is not installed.", n);
+            }
+            found
+        }
+        None => reg.plugins.iter().collect(),
+    };
+
+    for (idx, pl) in to_show.iter().enumerate() {
+        if to_show.len() > 1 {
+            if idx > 0 {
+                println!();
+            }
+            p::kv_accent("Plugin", &pl.name);
+        }
+        if pl.commands.is_empty() {
+            p::info("  (no commands registered)");
+        } else {
+            for cmd in &pl.commands {
+                p::info(&format!("  • {}  — {}", cmd.name, cmd.description));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn verify(name: Option<String>, deep: bool, runtime_check: bool) -> Result<()> {
     if deep || runtime_check {
         return run_audit(name, runtime_check);

@@ -394,3 +394,75 @@ fn telemetry_respects_env_override() {
     assert!(stdout.contains("Environment Override"));
     assert!(stdout.contains("false"));
 }
+
+fn write_config(home: &std::path::Path, contents: &str) {
+    let dir = home.join(".starforge");
+    std::fs::create_dir_all(&dir).expect("create config dir");
+    std::fs::write(dir.join("config.toml"), contents).expect("write config");
+}
+
+#[test]
+fn config_doctor_smoke_in_isolated_home() {
+    let home = isolated_home();
+    let output = starforge(home.path())
+        .args(["config", "doctor"])
+        .output()
+        .expect("spawn config doctor");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("StarForge Config Doctor"));
+    assert!(stdout.contains("schema"));
+    assert!(stdout.contains("Passed"));
+    assert!(
+        stdout.contains("no config.toml found") || stdout.contains("config version is"),
+        "expected default schema finding, got: {stdout}"
+    );
+}
+
+#[test]
+fn config_doctor_fails_on_invalid_wallet_key() {
+    let home = isolated_home();
+    write_config(
+        home.path(),
+        r#"
+version = "1"
+network = "testnet"
+
+[[wallets]]
+name = "bad"
+public_key = "not-a-key"
+network = "testnet"
+created_at = ""
+funded = false
+"#,
+    );
+
+    let output = starforge(home.path())
+        .args(["config", "doctor"])
+        .output()
+        .expect("spawn config doctor");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit for invalid wallet public key"
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("wallet") || combined.contains("public key"),
+        "expected wallet validation failure, got: {combined}"
+    );
+}
+
+#[test]
+fn config_help_lists_doctor_subcommand() {
+    let home = isolated_home();
+    let output = starforge(home.path())
+        .args(["config", "--help"])
+        .output()
+        .expect("spawn config help");
+    assert_success(&output, "starforge config --help");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("doctor"));
+}

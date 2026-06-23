@@ -296,6 +296,39 @@ pub fn rpc_url(network: &str) -> Result<String> {
     get_rpc_url(network)
 }
 
+/// Returns true when the Soroban RPC endpoint for `network` responds to `getHealth`.
+pub fn check_soroban_rpc(network: &str) -> bool {
+    match get_rpc_url(network) {
+        Ok(url) => check_soroban_rpc_url(&url),
+        Err(_) => false,
+    }
+}
+
+/// Returns true when a Soroban RPC URL responds to a `getHealth` JSON-RPC request.
+pub fn check_soroban_rpc_url(url: &str) -> bool {
+    let request = SorobanRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: 1,
+        method: "getHealth".to_string(),
+        params: serde_json::json!({}),
+    };
+
+    ureq::post(url)
+        .set("Content-Type", "application/json")
+        .send_json(&request)
+        .ok()
+        .and_then(|response| {
+            if response.status() != 200 {
+                return None;
+            }
+            response
+                .into_json::<SorobanRpcResponse<serde_json::Value>>()
+                .ok()
+        })
+        .map(|parsed| parsed.result.is_some())
+        .unwrap_or(false)
+}
+
 fn rpc_request_with_url<T>(rpc_url: &str, request: SorobanRpcRequest) -> Result<T>
 where
     T: DeserializeOwned,
@@ -872,5 +905,28 @@ mod tests {
     fn encode_invalid_bool_errors() {
         let err = encode_arguments(&["maybe".to_string()], &["bool".to_string()]).unwrap_err();
         assert!(err.to_string().len() > 0);
+    }
+
+    #[test]
+    fn check_soroban_rpc_url_reports_healthy_endpoint() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"jsonrpc":"2.0","id":1,"result":{"status":"healthy"}}"#)
+            .create();
+
+        assert!(check_soroban_rpc_url(&server.url()));
+        mock.assert();
+    }
+
+    #[test]
+    fn check_soroban_rpc_url_rejects_error_response() {
+        let mut server = mockito::Server::new();
+        let mock = server.mock("POST", "/").with_status(500).create();
+
+        assert!(!check_soroban_rpc_url(&server.url()));
+        mock.assert();
     }
 }

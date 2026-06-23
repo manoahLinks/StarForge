@@ -209,6 +209,17 @@ const COMMANDS: &[CmdEntry] = &[
         ],
     },
     CmdEntry {
+        name: "config",
+        about: "Manage starforge configuration",
+        subs: &[
+            ("show", "Show current global configuration"),
+            ("set", "Set a scalar configuration value"),
+            ("doctor", "Validate config and check connectivity"),
+            ("plugin-trust", "Manage trusted plugin source allowlist"),
+            ("set-encryption", "Set global wallet encryption parameters"),
+        ],
+    },
+    CmdEntry {
         name: "info",
         about: "Show starforge config and environment info",
         subs: &[],

@@ -5,6 +5,7 @@ pub mod config;
 pub mod contract;
 pub mod deploy;
 pub mod diagnostics;
+pub mod doctor;
 pub mod gas;
 pub mod info;
 pub mod inspect;

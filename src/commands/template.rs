@@ -545,11 +545,14 @@ fn print_quality_signals(template: &templates::TemplateEntry) {
 
 fn remove(name: String, purge: bool) -> Result<()> {
     templates::remove_template(&name, purge)?;
-    
+
     if purge {
         p::success(&format!("Template '{}' and all local assets removed", name));
     } else {
-        p::success(&format!("Template '{}' removed from registry (use --purge to also delete cached files)", name));
+        p::success(&format!(
+            "Template '{}' removed from registry (use --purge to also delete cached files)",
+            name
+        ));
     }
     Ok(())
 }
