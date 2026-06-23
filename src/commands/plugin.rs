@@ -3,7 +3,7 @@ use crate::plugins::manifest;
 use crate::plugins::registry::{self, RegisteredCommand, TrustLevel, UninstallOptions};
 use crate::plugins::{PluginLoadError, PluginManager};
 use crate::utils::print as p;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Subcommand;
 use starforge::utils::config;
 use std::path::Path;
@@ -243,6 +243,45 @@ fn list() -> Result<()> {
     Ok(())
 }
 
+fn commands(name: Option<String>) -> Result<()> {
+    p::header("Plugin Commands");
+    let reg = registry::load_registry().unwrap_or_default();
+    if reg.plugins.is_empty() {
+        p::info("No plugins installed. Use: starforge plugin install <name> --path <lib>");
+        return Ok(());
+    }
+
+    let selected: Vec<_> = match &name {
+        Some(plugin_name) => reg
+            .plugins
+            .iter()
+            .filter(|pl| pl.name == *plugin_name)
+            .collect(),
+        None => reg.plugins.iter().collect(),
+    };
+
+    if let Some(plugin_name) = &name {
+        if selected.is_empty() {
+            anyhow::bail!("Plugin '{}' not found in registry", plugin_name);
+        }
+    }
+
+    for pl in selected {
+        println!();
+        p::info(&format!("{}:", pl.name));
+        if pl.commands.is_empty() {
+            p::warn("  No commands registered");
+            continue;
+        }
+        for cmd in &pl.commands {
+            println!("  {}  — {}", cmd.name.cyan(), cmd.description.dimmed());
+        }
+    }
+
+    p::separator();
+    Ok(())
+}
+
 fn load() -> Result<()> {
     p::header("Plugin Loader");
 
@@ -256,8 +295,7 @@ fn load() -> Result<()> {
 
     // Warn about any unknown-trust plugins before loading.
     for pl in reg.plugins.iter().filter(|p| {
-        registry::classify_source_with_config(&p.source, &config) == TrustLevel::Unknown
-            && !p.source.is_empty()
+        registry::classify_source(&p.source) == TrustLevel::Unknown && !p.source.is_empty()
     }) {
         p::warn(&format!(
             "Plugin '{}' is from an unknown/untrusted source: {}",
@@ -376,6 +414,27 @@ fn uninstall(name: String, purge: bool, yes: bool) -> Result<()> {
     Ok(())
 }
 
+fn discover_commands_from_library(lib_path: &str) -> Result<Vec<RegisteredCommand>> {
+    let path = Path::new(lib_path);
+    let mut pm = PluginManager::new();
+    unsafe {
+        pm.load_plugin(path).with_context(|| {
+            format!(
+                "Failed to load plugin from '{}' to discover commands",
+                lib_path
+            )
+        })?;
+    }
+    Ok(pm
+        .list_commands()
+        .into_iter()
+        .map(|c| RegisteredCommand {
+            name: c.name,
+            description: c.description,
+        })
+        .collect())
+}
+
 fn update(name: Option<String>, yes: bool) -> Result<()> {
     p::header("Plugin Update");
 
@@ -436,7 +495,7 @@ fn update(name: Option<String>, yes: bool) -> Result<()> {
             continue;
         }
 
-        let trust = registry::classify_source_with_config(&pl.source, &config);
+        let trust = registry::classify_source(&pl.source);
         if trust == TrustLevel::Unknown && !yes {
             p::warn(&format!(
                 "  '{}' source '{}' is not trusted. Use --yes to force update from unknown sources.",
@@ -496,8 +555,8 @@ fn update(name: Option<String>, yes: bool) -> Result<()> {
                 }
             }
         } else {
-            // For GitHub and other sources, check if the library file on disk
-            // has been updated since install and refresh the registry timestamp.
+            // For GitHub and other sources, check if the library file on disk exists
+            // and refresh the registry metadata.
             let metadata = std::fs::metadata(&pl.path);
             match metadata {
                 Ok(m) => {
@@ -595,7 +654,7 @@ fn verify(name: Option<String>, deep: bool, runtime_check: bool) -> Result<()> {
     for pl in &to_check {
         let lib_exists = std::path::Path::new(&pl.path).exists();
 
-        let current_trust = registry::classify_source_with_config(&pl.source, &config);
+        let current_trust = registry::classify_source(&pl.source);
         let trust_ok = match current_trust {
             TrustLevel::Local | TrustLevel::Trusted => true,
             TrustLevel::Unknown => false,

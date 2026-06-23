@@ -362,8 +362,8 @@ pub fn handle(args: DeployArgs) -> Result<()> {
         args.network.clone(),
         risk_level,
     )
-    .add("WASM file", &wasm_path.display().to_string())
-    .add("WASM size", &format!("{:.1} KB", wasm_size_kb))
+    .add("WASM file", wasm_path.display().to_string())
+    .add("WASM size", format!("{:.1} KB", wasm_size_kb))
     .add("WASM hash", &wasm_hash)
     .add("Wallet", &wallet.name)
     .add("Public Key", &wallet.public_key)

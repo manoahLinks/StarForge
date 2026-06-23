@@ -1,3 +1,5 @@
+#![allow(clippy::items_after_test_module)]
+
 use crate::utils::crypto;
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -112,10 +114,10 @@ pub fn validate_secret_key(secret: &str) -> Result<()> {
         }
 
         // Validate base64 parts (first 3 parts are always base64)
-        for i in 0..3 {
-            BASE64.decode(parts[i]).map_err(|_| {
-                anyhow::anyhow!("Invalid base64 in encrypted secret bundle at part {}", i)
-            })?;
+        for part in parts.iter().take(3) {
+            BASE64
+                .decode(part)
+                .map_err(|_| anyhow::anyhow!("Invalid base64 in encrypted secret bundle"))?;
         }
 
         // If 5 or 6-part bundle, validate KDF parameters are valid u32
@@ -186,6 +188,63 @@ pub fn validate_wallet_name(name: &str) -> Result<()> {
         anyhow::bail!("Invalid wallet name '{}': contains invalid character '{}'. Use alphanumeric, dash, or underscore.", name, bad_char);
     }
     Ok(())
+}
+
+/// Validates the full configuration schema and wallet entries.
+pub fn validate_config(cfg: &Config) -> Result<()> {
+    if cfg.version.is_empty() {
+        anyhow::bail!("Config version is missing");
+    }
+
+    if cfg.network.trim().is_empty() {
+        anyhow::bail!("Active network is not set");
+    }
+
+    validate_network_exists(cfg, &cfg.network)?;
+
+    if cfg.networks.is_empty() {
+        anyhow::bail!("No networks configured");
+    }
+
+    for (name, net_cfg) in &cfg.networks {
+        validate_endpoint_url(
+            &net_cfg.horizon_url,
+            &format!("network '{}'.horizon_url", name),
+        )?;
+        if let Some(ref soroban_url) = net_cfg.soroban_rpc_url {
+            validate_endpoint_url(soroban_url, &format!("network '{}'.soroban_rpc_url", name))?;
+        }
+        if let Some(ref friendbot_url) = net_cfg.friendbot_url {
+            validate_endpoint_url(friendbot_url, &format!("network '{}'.friendbot_url", name))?;
+        }
+    }
+
+    for wallet in &cfg.wallets {
+        validate_wallet_name(&wallet.name)?;
+        validate_public_key(&wallet.public_key)?;
+        if let Some(ref secret) = wallet.secret_key {
+            validate_secret_key(secret)?;
+        }
+        validate_network_exists(cfg, &wallet.network)?;
+    }
+
+    for source in &cfg.plugin_trust.trusted_sources {
+        validate_plugin_trust_source(source)?;
+    }
+
+    Ok(())
+}
+
+fn validate_endpoint_url(url: &str, label: &str) -> Result<()> {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "Invalid {}: must start with http:// or https:// (got '{}')",
+            label,
+            url
+        )
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -633,6 +692,30 @@ mod tests {
         assert!(validate_secret_key("not-a-key").is_err());
         assert!(validate_secret_key("S123").is_err());
         assert!(validate_secret_key("bad:bundle").is_err());
+    }
+
+    #[test]
+    fn validate_config_accepts_default_config() {
+        let cfg = Config::default();
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn validate_config_rejects_missing_active_network() {
+        let cfg = Config {
+            network: "unknown-net".to_string(),
+            ..Default::default()
+        };
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("unknown-net"));
+    }
+
+    #[test]
+    fn validate_config_rejects_invalid_horizon_url() {
+        let mut cfg = Config::default();
+        cfg.networks.get_mut("testnet").unwrap().horizon_url = "ftp://bad.example.com".to_string();
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("horizon_url"));
     }
 
     #[test]

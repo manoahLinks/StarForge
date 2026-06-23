@@ -31,6 +31,8 @@ pub enum ConfigCommands {
         #[arg(long, default_value = "false")]
         reset: bool,
     },
+    /// Validate configuration, wallet keys, connectivity, and CLI tooling
+    Doctor,
 }
 
 #[derive(Subcommand)]
@@ -62,6 +64,7 @@ pub fn handle(cmd: ConfigCommands) -> Result<()> {
             parallelism,
             reset,
         } => set_encryption(mem, iterations, parallelism, reset),
+        ConfigCommands::Doctor => crate::commands::doctor::handle(),
     }
 }
 

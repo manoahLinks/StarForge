@@ -488,7 +488,7 @@ pub fn fetch_template_cached(entry: &TemplateEntry, force_refresh: bool) -> Resu
                 fs::remove_dir_all(&temp_old)?;
             }
             fs::rename(&dest, &temp_old)?;
-            
+
             // Try to fetch new template
             match fetch_template(entry, &dest) {
                 Ok(_) => {
@@ -506,7 +506,7 @@ pub fn fetch_template_cached(entry: &TemplateEntry, force_refresh: bool) -> Resu
                 }
             }
         } else {
-            return Ok(dest);
+            Ok(dest)
         }
     } else {
         fetch_template(entry, &dest)?;
@@ -838,7 +838,7 @@ pub fn add_template(entry: TemplateEntry) -> Result<()> {
 pub fn remove_template(name: &str, purge: bool) -> Result<()> {
     let mut registry = load_registry()?;
     let before = registry.templates.len();
-    
+
     registry.templates.retain(|t| t.name != name);
 
     if registry.templates.len() == before {
@@ -853,7 +853,7 @@ pub fn remove_template(name: &str, purge: bool) -> Result<()> {
     }
 
     Ok(())
-} 
+}
 
 /// Delete all local cached and stored assets for a template
 fn purge_template_assets(name: &str) -> Result<()> {
@@ -861,8 +861,12 @@ fn purge_template_assets(name: &str) -> Result<()> {
     if let Ok(storage_dir) = template_storage_dir() {
         let template_path = storage_dir.join(name);
         if template_path.exists() {
-            fs::remove_dir_all(&template_path)
-                .with_context(|| format!("Failed to purge stored template at {}", template_path.display()))?;
+            fs::remove_dir_all(&template_path).with_context(|| {
+                format!(
+                    "Failed to purge stored template at {}",
+                    template_path.display()
+                )
+            })?;
         }
     }
 
@@ -870,8 +874,12 @@ fn purge_template_assets(name: &str) -> Result<()> {
     if let Ok(cache_dir) = template_cache_dir() {
         let cache_path = cache_dir.join(name);
         if cache_path.exists() {
-            fs::remove_dir_all(&cache_path)
-                .with_context(|| format!("Failed to purge cached template at {}", cache_path.display()))?;
+            fs::remove_dir_all(&cache_path).with_context(|| {
+                format!(
+                    "Failed to purge cached template at {}",
+                    cache_path.display()
+                )
+            })?;
         }
     }
 
@@ -1901,10 +1909,10 @@ mod tests {
         entry.downloads = 1500;
 
         let badges = entry.trust_indicators();
-        assert!(badges.iter().any(|b| b.contains("Verified")));
-        assert!(badges.iter().any(|b| b.contains("Documented")));
-        assert!(badges.iter().any(|b| b.contains("Deprecated")));
-        assert!(badges.iter().any(|b| b.contains("Popular")));
+        assert!(badges.iter().any(|b| b.contains("VERIFIED")));
+        assert!(badges.iter().any(|b| b.contains("DOCS")));
+        assert!(badges.iter().any(|b| b.contains("DEPRECATED")));
+        assert!(badges.iter().any(|b| b.contains("POPULAR")));
     }
 
     #[test]
