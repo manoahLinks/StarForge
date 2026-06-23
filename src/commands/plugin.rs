@@ -344,6 +344,27 @@ fn uninstall(name: String, purge: bool, yes: bool) -> Result<()> {
     Ok(())
 }
 
+fn discover_commands_from_library(lib_path: &str) -> Result<Vec<RegisteredCommand>> {
+    let path = Path::new(lib_path);
+    let mut pm = PluginManager::new();
+    unsafe {
+        pm.load_plugin(path).with_context(|| {
+            format!(
+                "Failed to load plugin from '{}' to discover commands",
+                lib_path
+            )
+        })?;
+    }
+    Ok(pm
+        .list_commands()
+        .into_iter()
+        .map(|c| RegisteredCommand {
+            name: c.name,
+            description: c.description,
+        })
+        .collect())
+}
+
 fn update(name: Option<String>, yes: bool) -> Result<()> {
     p::header("Plugin Update");
 
